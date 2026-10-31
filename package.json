@@ -1,0 +1,38 @@
+{
+  "name": "pasc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PASC — Personality-Agent-Simulator & Connector: NapCat(QQ) 与 Agent(OpenClaw) 之间的筛选器 + 提示词构建器",
+  "packageManager": "pnpm@11.2.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "server": "pnpm --filter @pasc/server dev",
+    "fake-napcat": "pnpm --filter @pasc/fake-napcat dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "doctor": "pnpm --filter @pasc/server doctor"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "license": "MIT",
+  "keywords": [
+    "qq",
+    "napcat",
+    "onebot",
+    "agent",
+    "llm",
+    "persona",
+    "openclaw",
+    "chatbot"
+  ]
+}

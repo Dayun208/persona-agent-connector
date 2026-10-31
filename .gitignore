@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+logs/
+*.log
+.DS_Store
+.env
+.env.local
+coverage/
+
+# 内部部署记录与审计（含个人信息，不公开）
+docs/internal/

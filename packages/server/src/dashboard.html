@@ -1,0 +1,1426 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PASC · 人格模拟智能体桥接器</title>
+<style>
+  /* ---------- 设计系统 ---------- */
+  :root {
+    --r-card: 14px;
+    --r-btn: 9px;
+    --r-tag: 6px;
+    --gap: 16px;
+    --sidebar-w: 188px;
+    --topbar-h: 56px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    --t: 160ms cubic-bezier(.2,.7,.3,1);
+  }
+  html[data-theme="dark"] {
+    --bg: #0f1115; --panel: #161a22; --panel-2: #1b202a;
+    --border: #232833; --border-soft: #1d222b;
+    --text: #e8ecf4; --muted: #8892a6; --faint: #5b6478;
+    --accent: #7c6cf0; --accent-soft: #7c6cf022;
+    --ok: #2ecf8f; --warn: #f0b45c; --danger: #ff6b6b;
+    --shadow: 0 8px 30px #00000055;
+  }
+  html[data-theme="light"] {
+    --bg: #f6f7fb; --panel: #ffffff; --panel-2: #f9fafc;
+    --border: #e5e8f0; --border-soft: #eef1f6;
+    --text: #1a1f2b; --muted: #6b7486; --faint: #9aa3b5;
+    --accent: #6c5ce7; --accent-soft: #6c5ce714;
+    --ok: #12a06a; --warn: #c98213; --danger: #e04848;
+    --shadow: 0 8px 24px #1a1f2b12;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 14px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    transition: background var(--t), color var(--t);
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+
+  /* ---------- 布局 ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr;
+    grid-template-rows: var(--topbar-h) 1fr;
+    grid-template-areas: "brand topbar" "sidebar content";
+    height: 100vh;
+  }
+  .brand {
+    grid-area: brand; display: flex; align-items: center; gap: 10px; padding: 0 18px;
+    border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft);
+  }
+  .brand .logo {
+    width: 26px; height: 26px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), #b06cf0);
+    display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff;
+  }
+  .brand .name { font-weight: 650; letter-spacing: .3px; }
+  .brand .ver { font-size: 11px; color: var(--faint); margin-left: auto; font-family: var(--mono); }
+
+  .topbar {
+    grid-area: topbar; display: flex; align-items: center; gap: 8px; padding: 0 16px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border-soft);
+    font-size: 12.5px; color: var(--muted); white-space: nowrap;
+  }
+  .chip b { color: var(--text); font-weight: 550; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px #2ecf8f22; }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 0 3px #f0b45c22; }
+  .dot.bad { background: var(--danger); box-shadow: 0 0 0 3px #ff6b6b22; }
+  .dot.live { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .spacer { flex: 1; }
+  .icon-btn {
+    border: 1px solid var(--border-soft); background: var(--panel);
+    width: 34px; height: 34px; border-radius: var(--r-btn);
+    display: grid; place-items: center; cursor: pointer;
+    transition: background var(--t), border-color var(--t), transform var(--t);
+  }
+  .icon-btn:hover { background: var(--panel-2); border-color: var(--border); }
+  .icon-btn:active { transform: scale(.96); }
+
+  .sidebar {
+    grid-area: sidebar; border-right: 1px solid var(--border-soft);
+    padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--r-btn);
+    color: var(--muted); cursor: pointer; border: none; background: none;
+    text-align: left; width: 100%; transition: background var(--t), color var(--t);
+  }
+  .nav-item:hover { background: var(--panel); color: var(--text); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-item .ico { width: 16px; text-align: center; opacity: .9; }
+  .nav-item .soon { margin-left: auto; font-size: 10px; color: var(--faint); }
+
+  .content { grid-area: content; overflow: hidden; padding: 18px; }
+  .panel { display: none; height: 100%; overflow: auto; }
+  .panel.active { display: block; animation: fade .18s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- 通用组件 ---------- */
+  .card { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-card); padding: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  .mono { font-family: var(--mono); }
+
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--gap); margin-bottom: var(--gap); }
+  .stat { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-card); padding: 14px 16px; }
+  .stat .k { font-size: 11.5px; color: var(--muted); letter-spacing: .3px; }
+  .stat .v { font-size: 26px; font-weight: 650; font-family: var(--mono); margin-top: 4px; line-height: 1.1; }
+  .stat .s { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+  .stat.accent .v { color: var(--accent); }
+  .stat.ok .v { color: var(--ok); }
+  .stat.warn .v { color: var(--warn); }
+  .stat.danger .v { color: var(--danger); }
+
+  .grid-2 { display: grid; grid-template-columns: 340px 1fr; gap: var(--gap); }
+  .col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
+
+  .list { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+  .list-item {
+    padding: 10px 12px; border-radius: 10px; cursor: pointer;
+    display: flex; flex-direction: column; gap: 3px;
+    border: 1px solid transparent; transition: background var(--t), border-color var(--t);
+  }
+  .list-item:hover { background: var(--panel-2); }
+  .list-item.active { background: var(--accent-soft); border-color: #7c6cf04d; }
+  .list-item .row { display: flex; align-items: center; gap: 8px; }
+  .list-item .nm { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list-item .cnt { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .list-item .last { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
+    padding: 2px 7px; border-radius: var(--r-tag);
+    background: var(--panel-2); color: var(--muted); border: 1px solid var(--border-soft);
+  }
+  .tag.accent { color: var(--accent); background: var(--accent-soft); border-color: #7c6cf040; }
+
+  .btn {
+    padding: 7px 13px; border-radius: var(--r-btn); cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--border);
+    transition: background var(--t), border-color var(--t), transform var(--t);
+  }
+  .btn:hover { background: var(--border-soft); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 550; text-decoration: none; }
+  .btn.sm { padding: 4px 9px; font-size: 12px; }
+
+  /* ---------- 事件流 ---------- */
+  .events { display: flex; flex-direction: column; gap: 6px; overflow: auto; font-family: var(--mono); font-size: 12.5px; }
+  .ev { display: grid; grid-template-columns: 62px 46px 1fr; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 8px; }
+  .ev:hover { background: var(--panel-2); }
+  .ev .t { color: var(--faint); }
+  .ev .k { font-weight: 600; font-size: 11px; }
+  .ev .k.msg { color: var(--accent); }
+  .ev .k.judge { color: #4aa8ff; }
+  .ev .k.reply { color: var(--ok); }
+  .ev .k.exec { color: var(--warn); }
+  .ev .k.err { color: var(--danger); }
+  .ev .d { color: var(--text); overflow-wrap: anywhere; }
+
+  /* ---------- 会话时间线 ---------- */
+  .thread { display: flex; flex-direction: column; gap: 10px; overflow: auto; padding-right: 4px; }
+  .msg { display: flex; gap: 10px; padding-left: 10px; border-left: 2px solid var(--border); }
+  .msg.self { border-left-color: var(--accent); }
+  .msg.mention { border-left-color: #b06cf0; }
+  .msg .who { min-width: 104px; font-size: 12.5px; color: var(--muted); }
+  .msg .who b { color: var(--text); font-weight: 550; display: block; }
+  .msg .body { flex: 1; min-width: 0; }
+  .msg .txt { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg .meta { margin-top: 3px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+  .empty { display: grid; place-items: center; align-content: center; height: 100%; color: var(--faint); text-align: center; gap: 6px; }
+
+  /* ---------- 对话框 ---------- */
+  dialog {
+    border: 1px solid var(--border); border-radius: var(--r-card);
+    background: var(--panel); color: var(--text); padding: 0;
+    width: min(920px, 92vw); max-height: 82vh; box-shadow: var(--shadow);
+  }
+  dialog::backdrop { background: #00000066; }
+  dialog header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border-soft); }
+  dialog header h2 { margin: 0; font-size: 15px; }
+  dialog .body { padding: 16px 18px; overflow: auto; max-height: 62vh; }
+  dialog footer { padding: 12px 18px; border-top: 1px solid var(--border-soft); display: flex; gap: 8px; justify-content: flex-end; }
+  pre.block {
+    background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 10px;
+    padding: 12px; overflow: auto; font-family: var(--mono); font-size: 12.5px; margin: 0;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .toast {
+    position: fixed; right: 20px; bottom: 20px; z-index: 99;
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow);
+    opacity: 0; transform: translateY(8px); transition: opacity var(--t), transform var(--t);
+    pointer-events: none; max-width: 380px;
+  }
+  .toast.show { opacity: 1; transform: none; }
+
+
+  .input {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; outline: none; transition: border-color var(--t); width: 100%;
+  }
+  .input:focus { border-color: var(--accent); }
+  textarea.input { resize: vertical; line-height: 1.65; font-family: var(--mono); font-size: 12.5px; }
+  select.input { cursor: pointer; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field > label { font-size: 12px; color: var(--muted); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .section-title {
+    font-size: 11.5px; font-weight: 600; color: var(--muted); letter-spacing: .6px;
+    text-transform: uppercase; margin: 16px 0 8px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .section-title:first-child { margin-top: 0; }
+  .check { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; }
+  .check input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+  .check .warn { color: var(--warn); font-size: 11.5px; }
+  .qalist { display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+  .qa { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 12px; }
+  .qa .q { color: var(--muted); font-size: 12.5px; margin-bottom: 4px; }
+  .qa .a { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .mem-item { border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; }
+  .mem-item .txt { flex: 1; min-width: 0; }
+  .mem-item.archived { opacity: .55; }
+  .kv { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; align-items: center; }
+
+
+  .avatar {
+    position: relative; overflow: hidden;
+    width: 30px; height: 30px; border-radius: 50%; flex: 0 0 auto;
+    display: grid; place-items: center;
+    font-size: 12px; font-weight: 600; color: #fff; line-height: 1;
+    box-shadow: inset 0 0 0 1px #00000012;
+    user-select: none;
+  }
+  .avatar > img {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; display: block;
+  }
+  .avatar.sm { width: 24px; height: 24px; font-size: 10.5px; }
+  .list-item .row .nm { flex: 1; }
+  .msg .who { display: flex; align-items: center; gap: 8px; min-width: 128px; }
+  .msg .who .txt { display: flex; flex-direction: column; line-height: 1.35; }
+
+
+  .msg.exec {
+    border-left-color: var(--ex, var(--warn));
+    align-items: center;
+  }
+  .msg.exec .who {
+    width: 38px; height: 38px; min-width: 38px; border-radius: 50%;
+    display: grid; place-items: center; font-size: 21px; line-height: 1;
+    color: var(--ex, var(--warn)); background: var(--ex-badge, #f0b45c20);
+    box-shadow: inset 0 0 0 1px var(--ex-badge, #f0b45c20);
+  }
+  .msg.exec .txt { font-size: 13.5px; }
+  .msg.exec .txt b { color: var(--ex, var(--warn)); }
+  .msg.exec.bad { border-left-color: var(--danger); }
+
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; margin-bottom: 2px; }
+  .chip-x {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 8px; border-radius: 999px; font-size: 12px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid #7c6cf040;
+  }
+  .chip-x b { font-weight: 600; font-family: var(--mono); }
+  .chip-x button {
+    border: none; background: none; color: inherit; cursor: pointer;
+    padding: 0 0 0 2px; opacity: .65; font-size: 13px; line-height: 1;
+  }
+  .chip-x button:hover { opacity: 1; color: var(--danger); }
+
+
+  .btn.plus {
+    width: 40px; min-width: 40px; height: 36px; padding: 0;
+    font-size: 19px; font-weight: 500; line-height: 1; display: grid; place-items: center;
+    color: var(--accent); border-color: #7c6cf040; background: var(--accent-soft);
+  }
+  .btn.plus:hover { background: #7c6cf02e; }
+  .friend-list { display: flex; flex-direction: column; gap: 2px; max-height: 46vh; overflow: auto; margin-top: 10px; }
+  .friend {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border-radius: 10px; cursor: pointer; border: 1px solid transparent;
+    transition: background var(--t), border-color var(--t);
+  }
+  .friend:hover { background: var(--panel-2); }
+  .friend.on { background: var(--accent-soft); border-color: #7c6cf040; }
+  .friend .info { flex: 1; min-width: 0; }
+  .friend .nm { font-weight: 550; }
+  .friend .sub { font-size: 11.5px; color: var(--faint); font-family: var(--mono); }
+  .friend .state { font-size: 12px; color: var(--accent); }
+
+
+  /* ---------- 动效 ---------- */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideInRight { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  @keyframes spinOnce { from { transform: rotate(-180deg) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+  @keyframes ringPulse {
+    0% { box-shadow: 0 0 0 0 currentColor; opacity: .55; }
+    70% { box-shadow: 0 0 0 7px transparent; opacity: 0; }
+    100% { box-shadow: 0 0 0 0 transparent; opacity: 0; }
+  }
+
+  /* 进入动画 */
+  .anim-in { animation: fadeUp .32s cubic-bezier(.2,.7,.3,1) both; }
+  .stat { transition: transform var(--t), border-color var(--t), box-shadow var(--t); }
+  .stat:hover { transform: translateY(-2px); border-color: var(--border); box-shadow: var(--shadow); }
+  .stat .v.bump { animation: pop .42s cubic-bezier(.2,.7,.3,1); }
+
+  .card { transition: border-color var(--t); }
+  .list-item { transition: background var(--t), border-color var(--t), transform var(--t); }
+  .list-item:hover { transform: translateX(2px); }
+  .list-item.active { transform: translateX(2px); }
+
+  .msg { animation: fadeUp .26s cubic-bezier(.2,.7,.3,1) both; }
+  .msg.exec .who { animation: spinOnce .45s cubic-bezier(.2,.7,.3,1) both; }
+
+  .ev { animation: slideInRight .28s cubic-bezier(.2,.7,.3,1) both; }
+
+  .btn { transition: transform var(--t), background var(--t), border-color var(--t), box-shadow var(--t); }
+  .btn:hover { box-shadow: 0 2px 10px #00000012; }
+  .btn.primary:hover { box-shadow: 0 4px 14px #7c6cf03d; }
+
+  .tag { transition: transform var(--t); }
+  .list-item:hover .tag { transform: none; }
+
+  dialog[open] { animation: fadeUp .22s cubic-bezier(.2,.7,.3,1) both; }
+  dialog[open]::backdrop { animation: fadeIn .22s ease both; }
+
+  .friend { animation: fadeUp .22s cubic-bezier(.2,.7,.3,1) both; }
+  .friend:active { transform: scale(.99); }
+
+  .chip-x { animation: pop .3s cubic-bezier(.2,.7,.3,1); }
+
+  /* 加载骨架 */
+  .skeleton {
+    height: 34px; border-radius: 8px; margin-bottom: 8px;
+    background: linear-gradient(90deg, var(--panel-2) 25%, var(--border-soft) 37%, var(--panel-2) 63%);
+    background-size: 800px 100%; animation: shimmer 1.4s linear infinite;
+  }
+
+  .dot.live { animation: pulse 1.6s ease-in-out infinite; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  }
+
+  @media (max-width: 1100px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="brand">
+    <div class="logo">P</div>
+    <div class="name">PASC</div>
+    <div class="ver" id="ver">v0.1</div>
+  </div>
+
+  <header class="topbar">
+    <span class="chip"><span class="dot" id="d-napcat"></span>NapCat <b id="t-napcat">连接中</b></span>
+    <span class="chip"><span class="dot" id="d-agent"></span>网关 <b id="t-agent">—</b></span>
+    <span class="chip"><span class="dot" id="d-judge"></span>判断 <b id="t-judge">—</b></span>
+    <span class="chip"><span class="dot" id="d-sse"></span><b id="t-sse">实时流</b></span>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="theme" title="切换主题">◐</button>
+  </header>
+
+  <nav class="sidebar">
+    <button class="nav-item active" data-view="overview"><span class="ico">◎</span>概览</button>
+    <button class="nav-item" data-view="sessions"><span class="ico">≡</span>会话</button>
+    <button class="nav-item" data-view="persona"><span class="ico">◈</span>人格</button>
+    <button class="nav-item" data-view="memory"><span class="ico">◇</span>记忆</button>
+    <button class="nav-item" data-view="extract"><span class="ico">⌁</span>提纯</button>
+    <button class="nav-item" data-view="config"><span class="ico">⚙</span>设置</button>
+  </nav>
+
+  <main class="content">
+    <!-- ============ 概览 ============ -->
+    <section class="panel active" id="view-overview">
+      <div class="stats">
+        <div class="stat"><div class="k">累计消息</div><div class="v" id="s-in">0</div><div class="s" id="s-in-sub">池内 0 条</div></div>
+        <div class="stat accent"><div class="k">判断放行</div><div class="v" id="s-judge">0</div><div class="s" id="s-judge-sub">直接触发 0 次</div></div>
+        <div class="stat"><div class="k">平均延迟</div><div class="v" id="s-lat">0</div><div class="s" id="s-lat-sub">判断 0ms</div></div>
+        <div class="stat ok"><div class="k">已回复</div><div class="v" id="s-reply">0</div><div class="s" id="s-reply-sub">动作 0 次</div></div>
+        <div class="stat danger"><div class="k">错误</div><div class="v" id="s-err">0</div><div class="s" id="s-err-sub">拒绝 0 次</div></div>
+      </div>
+
+      <div class="grid-2" style="height: calc(100vh - 56px - 36px - 116px - 18px);">
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <h3>会话 <span class="faint" id="scene-count"></span></h3>
+            <div class="list" id="scene-list" style="flex:1;"></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <h3>实时事件</h3>
+            <div class="events" id="events" style="flex:1;">
+              <div class="faint" style="padding:8px">等待事件…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 会话 ============ -->
+    <section class="panel" id="view-sessions">
+      <div class="grid-2" style="height: calc(100vh - 56px - 36px);">
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <h3>会话列表</h3>
+            <div class="list" id="scene-list-2" style="flex:1;"></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <h3 style="margin:0;" id="thread-title">选择一个会话</h3>
+              <span class="spacer"></span>
+              <button class="btn sm" id="btn-prompt">查看 Prompt</button>
+              <button class="btn sm" id="btn-judge">试判断</button>
+              <button class="btn sm" id="btn-refresh">刷新</button>
+            </div>
+            <div class="thread" id="thread" style="flex:1;">
+              <div class="empty"><div>从左边选一个会话</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 人格 ============ -->
+    <section class="panel" id="view-persona">
+      <div class="grid-2" style="grid-template-columns: 300px 1fr; height: calc(100vh - 56px - 36px);">
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <h3>人格库</h3>
+            <div class="list" id="persona-list" style="flex:1;"></div>
+            <div style="display:flex; gap:8px; margin-top:12px;">
+              <button class="btn sm" id="btn-persona-new">+ 新建</button>
+              <button class="btn sm" id="btn-persona-import">导入 .md</button>
+            </div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:10px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input class="input" id="persona-name" placeholder="人格名称" style="max-width:200px;" />
+              <input class="input" id="persona-desc" placeholder="一句话描述" />
+            </div>
+            <textarea class="input" id="persona-content" style="flex:1; min-height:0;" placeholder="人格正文（markdown）"></textarea>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span class="faint" id="persona-meta"></span>
+              <span class="spacer"></span>
+              <button class="btn sm" id="btn-persona-del">删除</button>
+              <button class="btn sm" id="btn-persona-save">保存</button>
+              <button class="btn sm primary" id="btn-persona-activate">设为当前</button>
+            </div>
+          </div>
+          <div class="card" style="height:210px; display:flex; flex-direction:column;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <h3 style="margin:0;">few-shot 样本 <span class="faint" id="sample-count"></span></h3>
+              <span class="spacer"></span>
+              <button class="btn sm" id="btn-sample-add">+ 添加</button>
+            </div>
+            <div class="qalist" id="sample-list" style="flex:1; margin-top:10px;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 记忆 ============ -->
+    <section class="panel" id="view-memory">
+      <div class="stats" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="stat"><div class="k">记忆总数</div><div class="v" id="m-total">0</div><div class="s" id="m-sub">活跃 0</div></div>
+        <div class="stat ok"><div class="k">已归档</div><div class="v" id="m-arch">0</div><div class="s">衰减淘汰</div></div>
+        <div class="stat accent"><div class="k">已向量化</div><div class="v" id="m-emb">0</div><div class="s" id="m-emb-sub">—</div></div>
+        <div class="stat"><div class="k">平均重要度</div><div class="v" id="m-imp">0</div><div class="s">0 ~ 1</div></div>
+      </div>
+      <div class="card" style="height: calc(100vh - 56px - 36px - 116px - 18px); display:flex; flex-direction:column;">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input class="input" id="mem-q" placeholder="语义检索记忆…（回车搜索）" style="max-width:420px;" />
+          <button class="btn sm" id="btn-mem-search">搜索</button>
+          <button class="btn sm" id="btn-mem-clear">全部</button>
+          <span class="spacer"></span>
+          <button class="btn sm" id="btn-mem-decay">执行衰减</button>
+        </div>
+        <div class="qalist" id="mem-list" style="flex:1; margin-top:12px;"></div>
+      </div>
+    </section>
+
+    <!-- ============ 提纯 ============ -->
+    <section class="panel" id="view-extract">
+      <div class="grid-2" style="grid-template-columns: 340px 1fr; height: calc(100vh - 56px - 36px);">
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:10px;">
+            <h3>从聊天记录抽 Q/A</h3>
+            <div class="field"><label>会话</label><select class="input" id="ex-scene"></select></div>
+            <div class="field"><label>目标用户</label><select class="input" id="ex-user"></select></div>
+            <div class="field"><label>取多少条</label><input class="input" id="ex-limit" type="number" value="40" min="1" max="200" /></div>
+            <label class="check"><input type="checkbox" id="ex-asks" /> 把「对方提问」也算进候选</label>
+            <button class="btn primary" id="btn-ex-preview">生成候选</button>
+            <button class="btn" id="btn-ex-import">导入为 few-shot</button>
+            <button class="btn" id="btn-ex-distill">生成人格（AI 提纯）</button>
+            <div class="faint" id="ex-hint" style="font-size:12px;"></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <h3>候选配对 <span class="faint" id="ex-count"></span></h3>
+            <div class="qalist" id="ex-list" style="flex:1;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 设置 ============ -->
+    <section class="panel" id="view-config">
+      <div class="card" style="max-width:900px;">
+        <div class="section-title">连接</div>
+        <div class="row2">
+          <div class="field"><label>NapCat WS 地址</label><input class="input" id="c-napcat-addr" /></div>
+          <div class="field"><label>NapCat Token</label><input class="input" id="c-napcat-token" /></div>
+          <div class="field"><label>机器人 QQ（selfId）</label><input class="input" id="c-selfid" /></div>
+          <div class="field"><label>OpenClaw 地址</label><input class="input" id="c-agent-addr" /></div>
+          <div class="field"><label>OpenClaw Token</label><input class="input" id="c-agent-token" /></div>
+          <div class="field"><label>Agent ID</label><input class="input" id="c-agent-id" /></div>
+        </div>
+
+        <div class="section-title">模型</div>
+        <div class="row3">
+          <div class="field"><label>判断模型开关</label>
+            <label class="check"><input type="checkbox" id="c-judge-on" /> 启用</label></div>
+          <div class="field"><label>放行阈值</label><input class="input" id="c-threshold" type="number" step="0.05" min="0" max="1" /></div>
+          <div class="field"><label>每 N 条判一次</label><input class="input" id="c-everyn" type="number" min="1" /></div>
+          <div class="field"><label>判断模型名</label><input class="input" id="c-judge-model" /></div>
+          <div class="field"><label>判断 API</label><input class="input" id="c-judge-api" /></div>
+          <div class="field"><label>冷却（秒）</label><input class="input" id="c-cooldown" type="number" min="0" /></div>
+        </div>
+
+        <div class="section-title">行为</div>
+        <div class="row2">
+          <div class="field"><label>回复模式</label>
+            <select class="input" id="c-replymode">
+              <option value="both">@ + 引用 + 判断</option>
+              <option value="mention">仅 @ / 引用</option>
+              <option value="auto">仅判断模型</option>
+            </select>
+          </div>
+          <div class="field" style="grid-column: span 2;">
+            <label>管理员 QQ</label>
+            <div class="chips" id="admin-chips"></div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input class="input" id="c-admin-manual" placeholder="输入 QQ 号后回车添加" />
+              <button class="btn plus" id="btn-admin-pick" title="从好友中选择">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="row3" style="margin-top:12px;">
+          <label class="check"><input type="checkbox" id="c-allow-group" /> 群管理 <span class="warn">⚠</span></label>
+          <label class="check"><input type="checkbox" id="c-allow-file" /> 发文件 <span class="warn">⚠</span></label>
+          <label class="check"><input type="checkbox" id="c-allow-recall" /> 撤回 <span class="warn">⚠</span></label>
+          <label class="check"><input type="checkbox" id="c-allow-poke" /> 戳一戳</label>
+          <label class="check"><input type="checkbox" id="c-handle-private" /> 处理私聊</label>
+          <label class="check"><input type="checkbox" id="c-quote" /> 回复带引用</label>
+        </div>
+
+        <div class="section-title">注入</div>
+        <div class="row3">
+          <label class="check"><input type="checkbox" id="i-base" /> 基础提示词</label>
+          <label class="check"><input type="checkbox" id="i-persona" /> 人格</label>
+          <label class="check"><input type="checkbox" id="i-samples" /> few-shot</label>
+          <label class="check"><input type="checkbox" id="i-memory" /> 记忆</label>
+          <label class="check"><input type="checkbox" id="i-history" /> 历史</label>
+          <label class="check"><input type="checkbox" id="i-behavior" /> 行为权限</label>
+        </div>
+
+        <div style="display:flex; gap:8px; margin-top:20px; align-items:center;">
+          <span class="faint" id="c-status"></span>
+          <span class="spacer"></span>
+          <button class="btn" id="btn-c-reload">重新读取</button>
+          <button class="btn primary" id="btn-c-save">保存配置</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<dialog id="dlg">
+  <header><h2 id="dlg-title">详情</h2><span class="spacer"></span><button class="icon-btn" id="dlg-x">✕</button></header>
+  <div class="body"><pre class="block" id="dlg-body">…</pre></div>
+  <footer><button class="btn" id="dlg-close">关闭</button></footer>
+</dialog>
+
+<dialog id="friend-dlg">
+  <header><h2>选择管理员</h2><span class="spacer"></span><button class="icon-btn" id="friend-x">✕</button></header>
+  <div class="body">
+    <input class="input" id="friend-search" placeholder="搜索昵称 / 备注 / QQ 号" />
+    <div class="friend-list" id="friend-list"></div>
+  </div>
+  <footer>
+    <span class="faint" id="friend-count"></span>
+    <span class="spacer"></span>
+    <button class="btn primary" id="friend-done">完成</button>
+  </footer>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 基础 ================= */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmtNum = (n) => (n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(n ?? 0));
+const clock = (ts) => new Date(ts).toTimeString().slice(0, 8);
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+  return res.json();
+}
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+/* ================= 动效工具 ================= */
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** 数值变化时轻微弹一下 */
+function setStat(id, value) {
+  const el = $(id);
+  if (!el) return;
+  const next = String(value);
+  if (el.textContent === next) return;
+  el.textContent = next;
+  if (REDUCED) return;
+  el.classList.remove('bump');
+  void el.offsetWidth;
+  el.classList.add('bump');
+}
+
+/** 给一批新节点加错峰入场（最多 12 个参与错峰） */
+function stagger(root, selector, step = 22, maxDelay = 260) {
+  if (REDUCED || !root) return;
+  $$(selector, root).forEach((el, i) => {
+    const d = Math.min(i * step, maxDelay);
+    el.style.animationDelay = d + 'ms';
+    el.classList.add('anim-in');
+  });
+}
+
+/* ================= 主题 ================= */
+const THEME_KEY = 'pasc-theme';
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem(THEME_KEY, t);
+  $('#theme').textContent = t === 'dark' ? '☾' : '☀';
+}
+applyTheme(localStorage.getItem(THEME_KEY) || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+$('#theme').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+
+/* ================= 视图切换 ================= */
+const VIEWS = ['overview', 'sessions', 'persona', 'memory', 'extract', 'config'];
+
+function currentView() {
+  const h = (location.hash || '').replace(/^#\/?/, '');
+  return VIEWS.includes(h) ? h : 'overview';
+}
+
+function setView(view, opts) {
+  if (!VIEWS.includes(view)) view = 'overview';
+  $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  $$('.panel').forEach((p) => p.classList.remove('active'));
+  const panel = $('#view-' + view);
+  if (panel) panel.classList.add('active');
+
+  // 地址栏带上视图，刷新/收藏/前进后退都能回到原页面
+  const target = '#' + view;
+  if ((opts && opts.replaceHash) || location.hash !== target) {
+    if (opts && opts.replaceHash) history.replaceState(null, '', target);
+    else location.hash = view;
+  }
+
+  if (view === 'sessions') { loadScenes(); if (activeScene) loadThread(); }
+  if (view === 'persona') loadPersonas();
+  if (view === 'memory') loadMemory();
+  if (view === 'extract') loadExtractScenes();
+  if (view === 'config') loadConfig();
+  if (view === 'overview') loadScenes();
+}
+
+$$('.nav-item').forEach((btn) => {
+  btn.onclick = () => setView(btn.dataset.view);
+});
+window.addEventListener('hashchange', () => setView(currentView()));
+
+/* ================= 状态轮询 ================= */
+async function pollHealth() {
+  try {
+    const h = await api('/api/health');
+    const nap = (h.napcat && h.napcat.status) || 'closed';
+    $('#d-napcat').className = 'dot ' + (nap === 'connected' ? 'ok' : nap === 'connecting' || nap === 'reconnecting' ? 'warn live' : 'bad');
+    $('#t-napcat').textContent = nap === 'connected' ? (h.napcat.selfId || '已连接') : nap === 'closed' ? '断开' : '重连中';
+    if (h.napcat && h.napcat.selfId) selfUin = String(h.napcat.selfId);
+
+    const ok = h.agent && h.agent.ok;
+    $('#d-agent').className = 'dot ' + (ok ? 'ok' : 'bad');
+    $('#t-agent').textContent = ok ? 'ok' : '不可用';
+
+    const jm = h.judge || {};
+    $('#d-judge').className = 'dot ' + (jm.mode === 'model' ? 'ok' : 'warn');
+    $('#t-judge').textContent = jm.mode === 'model' ? (jm.model || 'model') : '启发式';
+
+    const s = h.stores || {};
+    $('#s-in-sub').textContent = '池内 ' + (h.pool ? h.pool.messages : 0) + ' 条 · 存档 ' + (s.archived || 0);
+  } catch (e) {
+    $('#d-napcat').className = 'dot bad';
+    $('#t-napcat').textContent = '不可达';
+  }
+}
+
+async function pollStats() {
+  try {
+    const s = (await api('/api/stats')).stats;
+    setStat('#s-in', fmtNum(s.messagesIn));
+    setStat('#s-judge', s.judgeHits + '/' + s.judgeRuns);
+    $('#s-judge-sub').textContent = '直接触发 ' + s.directTriggers + ' 次';
+    setStat('#s-lat', s.agentLatencyMsAvg ? (s.agentLatencyMsAvg / 1000).toFixed(1) + 's' : '—');
+    $('#s-lat-sub').textContent = '判断 ' + (s.judgeLatencyMsAvg || 0) + 'ms';
+    setStat('#s-reply', fmtNum(s.replies));
+    $('#s-reply-sub').textContent = '动作 ' + s.executions + ' 次 · 拒绝 ' + s.executionRejected;
+    setStat('#s-err', fmtNum(s.errors));
+    $('#s-err-sub').textContent = '拒绝 ' + s.executionRejected + ' 次';
+  } catch (e) { /* ignore */ }
+}
+
+
+/* ================= 头像 ================= */
+const AV_COLORS = ['#7c6cf0', '#4aa8ff', '#2ecf8f', '#f0b45c', '#ff6b6b', '#b06cf0', '#3bc9db'];
+let selfUin = '';
+
+function avatarColor(id) {
+  let h = 0;
+  for (let i = 0; i < String(id).length; i++) h = (h * 31 + String(id).charCodeAt(i)) >>> 0;
+  return AV_COLORS[h % AV_COLORS.length];
+}
+
+function userAvatarUrl(uin) {
+  return 'https://q1.qlogo.cn/g?b=qq&nk=' + encodeURIComponent(uin) + '&s=100';
+}
+function groupAvatarUrl(gid) {
+  return 'https://p.qlogo.cn/gh/' + encodeURIComponent(gid) + '/' + encodeURIComponent(gid) + '/100';
+}
+
+/** 头像：图片加载成功就盖住底色，失败则露出首字母 */
+function avatarHtml(id, name, opts) {
+  const kind = (opts && opts.kind) || 'user';
+  const size = opts && opts.small ? ' sm' : '';
+  const url = kind === 'group' ? groupAvatarUrl(id) : userAvatarUrl(id);
+  const initial = (name || id || '?').trim().slice(0, 1).toUpperCase();
+  // 图片绝对定位盖住首字母；加载失败就把 img 自己删掉，露出底下的首字母
+  return '<span class="avatar' + size + '" style="background-color:' + avatarColor(id) +
+    '" title="' + esc(name || id) + '">' +
+    '<img src="' + url + '" alt="" loading="lazy" onerror="this.remove()" />' +
+    '<span>' + esc(initial) + '</span></span>';
+}
+
+function sceneAvatar(s) {
+  const key = s.sceneKey || '';
+  if (key.indexOf('group:') === 0) return avatarHtml(key.slice(6), s.label || key, { kind: 'group' });
+  if (key.indexOf('private:') === 0) {
+    const uid = key.slice(8);
+    return avatarHtml(uid, s.label || uid, { kind: 'user' });
+  }
+  return '<span class="avatar">?</span>';
+}
+
+/* ================= 会话 ================= */
+let scenes = [];
+let activeScene = null;
+
+const sceneLabel = (s) => s.label || s.sceneKey;
+
+function renderScenes(target) {
+  const el = $(target);
+  if (!el) return;
+  if (!scenes.length) {
+    el.innerHTML = '<div class="faint" style="padding:10px">还没有会话</div>';
+    return;
+  }
+  el.innerHTML = scenes.map((s) =>
+    '<div class="list-item ' + (s.sceneKey === activeScene ? 'active' : '') + '" data-scene="' + esc(s.sceneKey) + '">' +
+      '<div class="row">' + sceneAvatar(s) +
+        '<span class="nm">' + esc(sceneLabel(s)) + '</span><span class="cnt">' + s.totalMessages + '</span></div>' +
+      '<div class="last">' + esc(s.lastText || '（无消息）') + '</div>' +
+    '</div>'
+  ).join('');
+  $$('.list-item', el).forEach((node) => {
+    node.onclick = () => {
+      activeScene = node.dataset.scene;
+      try { localStorage.setItem('pasc-scene', activeScene); } catch (e) { /* ignore */ }
+      renderScenes('#scene-list');
+      renderScenes('#scene-list-2');
+      loadThread();
+    };
+  });
+}
+
+async function loadScenes() {
+  if (!scenes.length) {
+    ['#scene-list', '#scene-list-2'].forEach((sel) => {
+      const el = $(sel);
+      if (el && !el.children.length) el.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+    });
+  }
+  try {
+    const items = (await api('/api/scenes')).items || [];
+    scenes = items;
+    $('#scene-count').textContent = scenes.length ? scenes.length + ' 个' : '';
+    renderScenes('#scene-list');
+    renderScenes('#scene-list-2');
+    if (!activeScene && scenes.length) {
+      activeScene = scenes[0].sceneKey;
+      renderScenes('#scene-list');
+      renderScenes('#scene-list-2');
+      loadThread();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function msgTags(m) {
+  const tags = [];
+  if (m.isSelf) tags.push('<span class="tag accent">机器人</span>');
+  if (m.mentionsSelf) tags.push('<span class="tag" style="color:#b06cf0">@我</span>');
+  const segs = m.segments || [];
+  if (segs.some((s) => s.type === 'reply')) tags.push('<span class="tag">引用</span>');
+  if (segs.some((s) => s.type === 'image')) tags.push('<span class="tag">图片</span>');
+  return tags.join('');
+}
+
+async function loadThread() {
+  if (!activeScene) return;
+  const meta = scenes.find((s) => s.sceneKey === activeScene);
+  $('#thread-title').textContent = meta ? sceneLabel(meta) : activeScene;
+  try {
+    const [msgResp, execResp] = await Promise.all([
+      api('/api/messages?sceneKey=' + encodeURIComponent(activeScene) + '&limit=60&desc=1'),
+      api('/api/executions?sceneKey=' + encodeURIComponent(activeScene) + '&limit=80').catch(() => ({ items: [] })),
+    ]);
+    const items = msgResp.items || [];
+    const execs = execResp.items || [];
+    const list = items.slice().reverse();
+    const el = $('#thread');
+    if (!list.length && !execs.length) {
+      el.innerHTML = '<div class="empty"><div>这个会话还没有消息</div></div>';
+      return;
+    }
+
+    // 消息与动作按时间合并成一条时间线
+    const merged = [
+      ...list.map((m) => ({ kind: 'msg', ts: m.timestamp, m })),
+      ...execs.map((e) => ({ kind: 'exec', ts: e.ts, e })),
+    ].sort((a, b) => a.ts - b.ts);
+
+    el.innerHTML = merged.map((row) => {
+      if (row.kind === 'exec') {
+        const e = row.e;
+        return '<div class="msg exec ' + (e.ok ? '' : 'bad') + '" style="' + actionVars(e.action, e.ok) + '">' +
+          '<div class="who">' + (e.ok ? '⚙' : '⚠') + '</div>' +
+          '<div class="body"><div class="txt">执行 <b>' + esc(e.action) + '</b>：' + esc(e.summary || '') +
+          ' <span class="tag ' + (e.ok ? 'accent' : 'bad') + '">' + (e.ok ? '成功' : '失败') + '</span>' +
+          (e.reason ? ' <span class="faint">' + esc(e.reason) + '</span>' : '') + '</div>' +
+          '<div class="meta"><span class="faint mono">' + clock(e.ts) + '</span>' +
+          '<span class="tag" style="color:var(--ex);background:var(--ex-soft);border-color:var(--ex-badge)">' +
+          esc(e.action) + '</span></div></div>' +
+        '</div>';
+      }
+      const m = row.m;
+      const cls = m.isSelf ? 'self' : m.mentionsSelf ? 'mention' : '';
+      const who = m.isSelf ? (selfUin || 'PASC') : m.senderId;
+      const label = m.isSelf ? 'PASC' : m.senderName;
+      return '<div class="msg ' + cls + '">' +
+        '<div class="who">' + avatarHtml(who, label) +
+          '<span class="txt"><b>' + esc(label) + '</b>' +
+          '<span class="faint mono">' + (m.isSelf ? '' : esc(m.senderId)) + '</span></span></div>' +
+        '<div class="body"><div class="txt">' + esc(m.text || '（非文本消息）') + '</div>' +
+        '<div class="meta"><span class="faint mono">' + clock(m.timestamp) + '</span>' + msgTags(m) + '</div></div>' +
+      '</div>';
+    }).join('');
+    stagger(el, '.msg', 16, 220);
+    el.scrollTop = el.scrollHeight;
+  } catch (e) {
+    toast('加载消息失败：' + e.message);
+  }
+}
+
+/* ================= 动作配色 ================= */
+const ACTION_COLORS = {
+  group_manage: '#f0b45c',
+  send_image: '#4aa8ff',
+  send_file: '#b06cf0',
+  react: '#ff8fb1',
+  like: '#ff8fb1',
+  poke: '#3bc9db',
+  recall: '#8892a6',
+  send_message: '#7c6cf0',
+};
+
+function actionVars(action, ok) {
+  const base = ok ? (ACTION_COLORS[action] || '#f0b45c') : '#ff6b6b';
+  return '--ex:' + base + ';--ex-soft:' + base + '14;--ex-badge:' + base + '26';
+}
+
+/* ================= 事件流 ================= */
+const EVENT_LABEL = { message: ['msg', '收'], judge: ['judge', '判'], reply: ['reply', '回'], execution: ['exec', '做'], prompt: ['msg', '词'], error: ['err', '错'], skip: ['judge', '默'], status: ['judge', '态'] };
+let eventCount = 0;
+
+function pushEvent(ev) {
+  const box = $('#events');
+  if (eventCount++ === 0) box.innerHTML = '';
+  const pair = EVENT_LABEL[ev.type] || ['judge', ev.type];
+  const d = ev.data || {};
+  let text = '';
+  if (ev.type === 'message') text = (d.senderName || d.senderId) + ': ' + (d.text || '');
+  else if (ev.type === 'judge') text = (d.shouldReply ? '放行 ' : '沉默 ') + d.confidence + ' · ' + (d.reason || '');
+  else if (ev.type === 'reply') text = d.text || '';
+  else if (ev.type === 'execution') text = d.action + ' ' + (d.ok ? '✔' : '✘') + ' ' + (d.detail ? JSON.stringify(d.detail).slice(0, 90) : d.reason || '');
+  else if (ev.type === 'prompt') text = d.chars + ' 字 · ' + d.tokens + ' tok · ' + (d.sections || []).join('+');
+  else if (ev.type === 'skip') text = d.reason || '';
+  else text = JSON.stringify(d).slice(0, 120);
+
+  const node = document.createElement('div');
+  node.className = 'ev';
+  node.innerHTML = '<span class="t">' + clock(ev.ts) + '</span><span class="k ' + pair[0] + '">' + pair[1] + '</span><span class="d">' + esc(text) + '</span>';
+  box.appendChild(node);
+  while (box.children.length > 300) box.removeChild(box.firstChild);
+  box.scrollTo({ top: box.scrollHeight, behavior: REDUCED ? 'auto' : 'smooth' });
+}
+
+let es;
+function connectSSE() {
+  if (es) es.close();
+  es = new EventSource('/api/events');
+  es.onopen = () => { $('#d-sse').className = 'dot ok'; $('#t-sse').textContent = '实时流'; };
+  es.onerror = () => {
+    $('#d-sse').className = 'dot bad';
+    $('#t-sse').textContent = '重连中';
+    es.close();
+    setTimeout(connectSSE, 3000);
+  };
+  es.onmessage = (e) => { try { pushEvent(JSON.parse(e.data)); } catch (err) { /* ignore */ } };
+}
+
+/* ================= 弹窗 ================= */
+function openDialog(title, text) {
+  $('#dlg-title').textContent = title;
+  $('#dlg-body').textContent = text;
+  $('#dlg').showModal();
+}
+$('#dlg-x').onclick = () => $('#dlg').close();
+$('#dlg-close').onclick = () => $('#dlg').close();
+
+$('#btn-prompt').onclick = async () => {
+  if (!activeScene) { toast('先选一个会话'); return; }
+  const body = { text: '（预览）在吗', senderId: '0', senderName: '预览' };
+  if (activeScene.indexOf('group:') === 0) body.groupId = activeScene.slice(6);
+  try {
+    const p = (await api('/api/prompt/preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).prompt;
+    openDialog('Prompt 预览 · ' + p.chars + ' 字 / ' + p.estimatedTokens + ' tok',
+      '【段落】' + p.sections.join(' → ') + '\n\n===== SYSTEM =====\n' + p.system + '\n\n===== USER =====\n' + p.user);
+  } catch (e) { toast('预览失败：' + e.message); }
+};
+
+$('#btn-judge').onclick = async () => {
+  if (!activeScene) { toast('先选一个会话'); return; }
+  const body = { text: '（测试）现在群里聊得怎么样', senderId: '0', senderName: '测试' };
+  if (activeScene.indexOf('group:') === 0) body.groupId = activeScene.slice(6);
+  try {
+    const d = (await api('/api/judge/test', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).decision;
+    openDialog('判断结果', JSON.stringify(d, null, 2));
+  } catch (e) { toast('判断失败：' + e.message); }
+};
+
+$('#btn-refresh').onclick = () => { loadScenes(); loadThread(); toast('已刷新'); };
+
+
+/* ================= 人格 ================= */
+let personaList = [], personaActive = null, editingId = null;
+
+async function loadPersonas() {
+  const d = await api('/api/personas');
+  personaList = d.items || [];
+  personaActive = d.activeId;
+  renderPersonas();
+  if (!editingId && personaList.length) selectPersona(personaActive || personaList[0].id);
+}
+
+function renderPersonas() {
+  const el = $('#persona-list');
+  if (!el) return;
+  el.innerHTML = personaList.length
+    ? personaList.map((p) =>
+        '<div class="list-item ' + (p.id === editingId ? 'active' : '') + '" data-id="' + esc(p.id) + '">' +
+          '<div class="row"><span class="nm">' + esc(p.name) + '</span>' +
+          (p.id === personaActive ? '<span class="tag accent">当前</span>' : '') + '</div>' +
+          '<div class="last">' + p.content.length + ' 字 · ' + esc(p.description || '') + '</div>' +
+        '</div>').join('')
+    : '<div class="faint" style="padding:10px">还没有人格</div>';
+  $$('#persona-list .list-item').forEach((n) => { n.onclick = () => selectPersona(n.dataset.id); });
+}
+
+function selectPersona(id) {
+  const p = personaList.find((x) => x.id === id);
+  if (!p) return;
+  editingId = id;
+  $('#persona-name').value = p.name;
+  $('#persona-desc').value = p.description || '';
+  $('#persona-content').value = p.content;
+  $('#persona-meta').textContent = p.content.length + ' 字';
+  renderPersonas();
+}
+
+$('#btn-persona-new').onclick = () => {
+  editingId = null;
+  $('#persona-name').value = '';
+  $('#persona-desc').value = '';
+  $('#persona-content').value = '# 新人格\n\n';
+  $('#persona-meta').textContent = '未保存';
+  renderPersonas();
+};
+
+$('#btn-persona-save').onclick = async () => {
+  const name = $('#persona-name').value.trim();
+  const content = $('#persona-content').value;
+  if (!name || !content.trim()) { toast('名称和正文都不能为空'); return; }
+  try {
+    await api('/api/personas', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...(editingId ? { id: editingId } : {}), name, description: $('#persona-desc').value.trim(), content }),
+    });
+    toast('已保存'); await loadPersonas();
+  } catch (e) { toast('保存失败：' + e.message); }
+};
+
+$('#btn-persona-activate').onclick = async () => {
+  if (!editingId) { toast('先选一个人格'); return; }
+  try {
+    await api('/api/personas/' + editingId + '/activate', { method: 'POST' });
+    toast('已设为当前人格'); await loadPersonas();
+  } catch (e) { toast('激活失败：' + e.message); }
+};
+
+$('#btn-persona-del').onclick = async () => {
+  if (!editingId) return;
+  if (!confirm('确定删除这个人格？')) return;
+  try {
+    await api('/api/personas/' + editingId, { method: 'DELETE' });
+    editingId = null; toast('已删除'); await loadPersonas();
+  } catch (e) { toast('删除失败：' + e.message); }
+};
+
+$('#btn-persona-import').onclick = () => {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.md,.txt';
+  input.onchange = async () => {
+    const f = input.files[0]; if (!f) return;
+    const text = await f.text();
+    editingId = null;
+    $('#persona-name').value = f.name.replace(/\.(md|txt)$/i, '');
+    $('#persona-content').value = text;
+    $('#persona-meta').textContent = text.length + ' 字（未保存）';
+    toast('已读入，记得点保存');
+  };
+  input.click();
+};
+
+$('#btn-sample-add').onclick = async () => {
+  const q = prompt('对方会说什么？（问题）'); if (!q) return;
+  const a = prompt('机器人该怎么回？（答案）'); if (!a) return;
+  try {
+    await api('/api/samples', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: q, answer: a, source: 'manual' }) });
+    toast('已添加'); loadSamples();
+  } catch (e) { toast('添加失败：' + e.message); }
+};
+
+async function loadSamples() {
+  try {
+    const items = (await api('/api/samples')).items || [];
+    $('#sample-count').textContent = items.length ? items.length + ' 条' : '';
+    $('#sample-list').innerHTML = items.length
+      ? items.map((s) =>
+          '<div class="qa" data-id="' + esc(s.id) + '"><div class="q">Q: ' + esc(s.question) + '</div>' +
+          '<div class="a">A: ' + esc(s.answer) + '</div>' +
+          '<div class="kv"><span class="faint mono">' + esc(s.source || '') + '</span>' +
+          '<span class="spacer"></span><button class="btn sm" data-del="' + esc(s.id) + '">删除</button></div></div>').join('')
+      : '<div class="faint">还没有样本。可以在「提纯」页从聊天记录生成，或点右上角添加。</div>';
+    $$('#sample-list [data-del]').forEach((b) => {
+      b.onclick = async () => {
+        try { await api('/api/samples/' + b.dataset.del, { method: 'DELETE' }); loadSamples(); } catch (e) { toast('删除失败'); }
+      };
+    });
+  } catch (e) { /* ignore */ }
+}
+
+/* ================= 记忆 ================= */
+function memCard(m) {
+  const score = m.score !== undefined ? '匹配 ' + Number(m.score).toFixed(2) : '';
+  return '<div class="mem-item ' + (m.status === 'archived' ? 'archived' : '') + '">' +
+    '<div class="txt"><div>' + esc(m.text || '') + '</div>' +
+    '<div class="kv"><span class="tag">' + esc(m.type || 'fact') + '</span>' +
+    '<span class="faint mono">重要度 ' + Number(m.importance || 0).toFixed(2) + '</span>' +
+    '<span class="faint mono">访问 ' + (m.accessCount || 0) + '</span>' +
+    (m.status && m.status !== 'active' ? '<span class="tag warn">' + esc(m.status) + '</span>' : '') +
+    (score ? '<span class="tag accent">' + score + '</span>' : '') +
+    '</div></div>' +
+    '<div style="display:flex; gap:6px;">' +
+    (m.status === 'archived' ? '<button class="btn sm" data-restore="' + esc(m.id) + '">恢复</button>' : '') +
+    '<button class="btn sm" data-mdel="' + esc(m.id) + '">删除</button></div></div>';
+}
+
+async function loadMemory() {
+  try {
+    const st = await api('/api/memory/stats');
+    $('#m-total').textContent = st.total; $('#m-sub').textContent = '活跃 ' + st.active;
+    $('#m-arch').textContent = st.archived; $('#m-emb').textContent = st.embedded;
+    $('#m-emb-sub').textContent = st.withEmbeddingModel ? '已配嵌入模型' : '未配嵌入';
+    $('#m-imp').textContent = Number(st.avgImportance || 0).toFixed(2);
+    const items = (await api('/api/memories?limit=60')).items || [];
+    renderMemList(items);
+  } catch (e) { toast('读取记忆失败：' + e.message); }
+}
+
+function renderMemList(items) {
+  $('#mem-list').innerHTML = items.length ? items.map(memCard).join('') : '<div class="faint" style="padding:10px">还没有记忆。机器人聊天时会自动积累。</div>';
+  $$('#mem-list [data-mdel]').forEach((b) => { b.onclick = async () => { try { await api('/api/memories/' + b.dataset.mdel, { method: 'DELETE' }); loadMemory(); } catch { toast('删除失败'); } }; });
+  $$('#mem-list [data-restore]').forEach((b) => { b.onclick = async () => { try { await api('/api/memories/' + b.dataset.restore + '/restore', { method: 'POST' }); loadMemory(); } catch { toast('恢复失败'); } }; });
+}
+
+$('#btn-mem-search').onclick = async () => {
+  const q = $('#mem-q').value.trim();
+  if (!q) { loadMemory(); return; }
+  try {
+    const d = await api('/api/memory/search?q=' + encodeURIComponent(q) + '&limit=30');
+    renderMemList(d.hits || []);
+    toast('命中 ' + (d.hits || []).length + ' 条');
+  } catch (e) { toast('搜索失败：' + e.message); }
+};
+$('#mem-q').onkeydown = (e) => { if (e.key === 'Enter') $('#btn-mem-search').click(); };
+$('#btn-mem-clear').onclick = () => { $('#mem-q').value = ''; loadMemory(); };
+$('#btn-mem-decay').onclick = async () => {
+  try { const r = await api('/api/memory/decay', { method: 'POST' }); toast('衰减完成，归档 ' + (r.archived || 0) + ' 条'); loadMemory(); }
+  catch (e) { toast('衰减失败：' + e.message); }
+};
+
+/* ================= 提纯 ================= */
+async function loadExtractScenes() {
+  try {
+    const items = (await api('/api/scenes')).items || [];
+    const sel = $('#ex-scene');
+    sel.innerHTML = items.map((s) => '<option value="' + esc(s.sceneKey) + '">' + esc(s.label) + '（' + s.totalMessages + '）</option>').join('');
+    if (items.length) loadExtractUsers();
+  } catch (e) { /* ignore */ }
+}
+
+async function loadExtractUsers() {
+  const sceneKey = $('#ex-scene').value;
+  if (!sceneKey) return;
+  try {
+    const items = (await api('/api/users?sceneKey=' + encodeURIComponent(sceneKey))).items || [];
+    $('#ex-user').innerHTML = items.map((u) => '<option value="' + esc(u.senderId) + '">' + esc(u.senderName) + '（' + u.count + ' 条）</option>').join('');
+  } catch (e) { /* ignore */ }
+}
+$('#ex-scene').onchange = () => loadExtractUsers();
+
+$('#btn-ex-preview').onclick = async () => {
+  const sceneKey = $('#ex-scene').value, senderId = $('#ex-user').value;
+  if (!senderId) { toast('先选一个用户'); return; }
+  const qs = new URLSearchParams({ senderId, limit: $('#ex-limit').value || '40' });
+  if (sceneKey) qs.set('sceneKey', sceneKey);
+  if ($('#ex-asks').checked) qs.set('includeAsks', '1');
+  try {
+    const d = await api('/api/extract/qas?' + qs.toString());
+    const pairs = d.pairs || [];
+    $('#ex-count').textContent = pairs.length ? pairs.length + ' 对' : '';
+    $('#ex-list').innerHTML = pairs.length
+      ? pairs.map((p) => '<div class="qa"><div class="q">Q: ' + esc(p.question || p.ask || '') + '</div><div class="a">A: ' + esc(p.answer || p.reply || '') + '</div></div>').join('')
+      : '<div class="faint">没有抽到配对。换成别人，或勾选「把对方提问也算进候选」。</div>';
+    $('#ex-hint').textContent = '目标用户发言 ' + (d.targetMessages || 0) + ' 条，配出 ' + pairs.length + ' 对';
+  } catch (e) { toast('抽取失败：' + e.message); }
+};
+
+$('#btn-ex-import').onclick = async () => {
+  const sceneKey = $('#ex-scene').value, senderId = $('#ex-user').value;
+  if (!senderId) return;
+  try {
+    const r = await api('/api/extract/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senderId, sceneKey, limit: Number($('#ex-limit').value) || 20 }) });
+    toast('已导入 ' + (r.count ?? r.imported ?? 0) + ' 条样本');
+    loadSamples();
+  } catch (e) { toast('导入失败：' + e.message); }
+};
+
+$('#btn-ex-distill').onclick = async () => {
+  const sceneKey = $('#ex-scene').value, senderId = $('#ex-user').value;
+  if (!senderId) return;
+  toast('正在提纯，可能要几十秒…');
+  try {
+    const r = await api('/api/extract/distill', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senderId, sceneKey, save: true, activate: false }) });
+    toast('提纯完成' + (r.persona ? '：' + r.persona.name : ''));
+    openDialog('提纯结果', (r.persona && r.persona.content) || JSON.stringify(r, null, 2));
+    loadPersonas();
+  } catch (e) { toast('提纯失败：' + e.message); }
+};
+
+/* ================= 设置 ================= */
+let adminList = [];
+let friendList = [];
+
+function renderAdminChips() {
+  const el = $('#admin-chips');
+  if (!el) return;
+  el.innerHTML = adminList.length
+    ? adminList.map((id) => {
+        const f = friendList.find((x) => x.userId === id);
+        const label = f ? (f.remark || f.nickname) : id;
+        return '<span class="chip-x"><b>' + esc(id) + '</b>' +
+          (f ? '<span style="opacity:.8">' + esc(label) + '</span>' : '') +
+          '<button data-rm="' + esc(id) + '" title="移除">✕</button></span>';
+      }).join('')
+    : '<span class="faint" style="font-size:12px">还没有管理员（群管理类动作需要管理员）</span>';
+  $$('#admin-chips [data-rm]').forEach((b) => {
+    b.onclick = () => { adminList = adminList.filter((x) => x !== b.dataset.rm); renderAdminChips(); renderFriendList($('#friend-search').value); };
+  });
+}
+
+function addAdmin(id) {
+  const v = String(id || '').trim();
+  if (!/^\d{5,12}$/.test(v)) { toast('QQ 号看起来不对'); return false; }
+  if (adminList.includes(v)) { toast('已经在列表里了'); return false; }
+  adminList.push(v);
+  renderAdminChips();
+  return true;
+}
+
+function toggleAdmin(id) {
+  if (adminList.includes(id)) {
+    adminList = adminList.filter((x) => x !== id);
+    renderAdminChips();
+    return false;
+  }
+  adminList.push(id);
+  renderAdminChips();
+  return true;
+}
+
+function renderFriendList(filter) {
+  const box = $('#friend-list');
+  if (!box) return;
+  const kw = (filter || '').trim().toLowerCase();
+  const list = friendList.filter((f) => !kw || (f.nickname + f.remark + f.userId).toLowerCase().includes(kw));
+  box.innerHTML = list.length
+    ? list.map((f) => {
+        const on = adminList.includes(f.userId);
+        return '<div class="friend ' + (on ? 'on' : '') + '" data-uid="' + esc(f.userId) + '">' +
+          avatarHtml(f.userId, f.nickname || f.userId) +
+          '<div class="info"><div class="nm">' + esc(f.remark || f.nickname || f.userId) + '</div>' +
+          '<div class="sub">' + esc(f.userId) + (f.remark && f.nickname ? ' · ' + esc(f.nickname) : '') + '</div></div>' +
+          '<span class="state">' + (on ? '✓ 已添加' : '+') + '</span></div>';
+      }).join('')
+    : '<div class="faint" style="padding:16px;text-align:center">没有匹配的好友</div>';
+  stagger(box, '.friend', 18, 200);
+  $$('#friend-list .friend').forEach((row) => {
+    row.onclick = () => {
+      toggleAdmin(row.dataset.uid);
+      renderFriendList($('#friend-search').value);
+    };
+  });
+  const cnt = $('#friend-count');
+  if (cnt) cnt.textContent = '已选 ' + adminList.length + ' 人';
+}
+
+async function loadFriends() {
+  if (friendList.length) return friendList;
+  try {
+    const d = await api('/api/friends');
+    friendList = d.items || [];
+  } catch (e) {
+    friendList = [];
+  }
+  return friendList;
+}
+
+async function openFriendPicker() {
+  $('#friend-dlg').showModal();
+  $('#friend-search').value = '';
+  $('#friend-list').innerHTML = '<div class="faint" style="padding:16px;text-align:center">加载好友…</div>';
+  await loadFriends();
+  if (!friendList.length) {
+    $('#friend-list').innerHTML = '<div class="faint" style="padding:16px;text-align:center">没读到好友列表（NapCat 可能未连接），可以用输入框手动添加</div>';
+    return;
+  }
+  renderFriendList('');
+}
+
+$('#btn-admin-pick').onclick = openFriendPicker;
+$('#friend-x').onclick = () => { $('#friend-dlg').close(); renderAdminChips(); };
+$('#friend-done').onclick = () => { $('#friend-dlg').close(); renderAdminChips(); };
+$('#friend-search').oninput = (e) => renderFriendList(e.target.value);
+
+$('#c-admin-manual').onkeydown = (e) => {
+  if (e.key !== 'Enter') return;
+  if (addAdmin(e.target.value)) { e.target.value = ''; toast('已添加'); }
+};
+
+async function loadConfig() {
+  try {
+    const c = await api('/api/config');
+    cfgCache = c;
+    $('#c-napcat-addr').value = c.napcat.address || '';
+    $('#c-napcat-token').value = c.napcat.accessToken || '';
+    $('#c-selfid').value = c.napcat.selfId || '';
+    $('#c-agent-addr').value = c.openclaw.address || '';
+    $('#c-agent-token').value = c.openclaw.token || '';
+    $('#c-agent-id').value = c.openclaw.agentId || '';
+    $('#c-judge-on').checked = !!c.judgeModel.enabled;
+    $('#c-threshold').value = c.judgeModel.replyThreshold;
+    $('#c-everyn').value = c.judgeModel.judgeEveryN;
+    $('#c-cooldown').value = Math.round((c.judgeModel.replyCooldownMs || 0) / 1000);
+    $('#c-judge-model').value = (c.judgeModel.api && c.judgeModel.api.model) || '';
+    $('#c-judge-api').value = (c.judgeModel.api && c.judgeModel.api.baseURL) || '';
+    $('#c-replymode').value = c.pipeline.replyMode;
+    adminList = [...(c.behavior.admins || [])];
+    renderAdminChips();
+    $('#c-allow-group').checked = !!c.behavior.allowGroupManage;
+    $('#c-allow-file').checked = !!c.behavior.allowFileSend;
+    $('#c-allow-recall').checked = !!c.behavior.allowRecall;
+    $('#c-allow-poke').checked = !!c.behavior.allowPoke;
+    $('#c-handle-private').checked = !!c.pipeline.handlePrivate;
+    $('#c-quote').checked = !!c.pipeline.quoteReply;
+    const inj = c.prompt.inject || {};
+    $('#i-base').checked = !!inj.base; $('#i-persona').checked = !!inj.persona;
+    $('#i-samples').checked = !!inj.samples; $('#i-memory').checked = !!inj.memory;
+    $('#i-history').checked = !!inj.history; $('#i-behavior').checked = !!inj.behavior;
+    $('#c-status').textContent = '已读取';
+    if (!friendList.length) loadFriends().then(renderAdminChips);
+  } catch (e) { $('#c-status').textContent = '读取失败：' + e.message; }
+}
+
+$('#btn-c-reload').onclick = () => loadConfig();
+
+$('#btn-c-save').onclick = async () => {
+  const admins = [...adminList];
+  const patch = {
+    napcat: { address: $('#c-napcat-addr').value.trim(), accessToken: $('#c-napcat-token').value.trim(), selfId: $('#c-selfid').value.trim() },
+    openclaw: { address: $('#c-agent-addr').value.trim(), token: $('#c-agent-token').value.trim(), agentId: $('#c-agent-id').value.trim() },
+    judgeModel: {
+      enabled: $('#c-judge-on').checked,
+      replyThreshold: Number($('#c-threshold').value),
+      judgeEveryN: Number($('#c-everyn').value),
+      replyCooldownMs: Number($('#c-cooldown').value) * 1000,
+      api: { model: $('#c-judge-model').value.trim(), baseURL: $('#c-judge-api').value.trim() },
+    },
+    pipeline: { replyMode: $('#c-replymode').value, handlePrivate: $('#c-handle-private').checked, quoteReply: $('#c-quote').checked },
+    behavior: {
+      admins,
+      allowGroupManage: $('#c-allow-group').checked,
+      allowFileSend: $('#c-allow-file').checked,
+      allowRecall: $('#c-allow-recall').checked,
+      allowPoke: $('#c-allow-poke').checked,
+    },
+    prompt: { inject: {
+      base: $('#i-base').checked, persona: $('#i-persona').checked, samples: $('#i-samples').checked,
+      memory: $('#i-memory').checked, history: $('#i-history').checked, behavior: $('#i-behavior').checked,
+    } },
+  };
+  try {
+    await api('/api/config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) });
+    $('#c-status').textContent = '已保存 ' + new Date().toTimeString().slice(0, 8);
+    toast('配置已生效');
+  } catch (e) { toast('保存失败：' + e.message); }
+};
+
+/* ================= 启动 ================= */
+try { activeScene = localStorage.getItem('pasc-scene') || null; } catch (e) { activeScene = null; }
+setView(currentView(), { replaceHash: true });
+pollHealth();
+pollStats();
+loadScenes();
+loadSamples();
+connectSSE();
+setInterval(pollHealth, 5000);
+setInterval(pollStats, 5000);
+setInterval(() => { if ($('#view-overview').classList.contains('active')) loadScenes(); }, 15000);
+</script>
+</body>
+</html>

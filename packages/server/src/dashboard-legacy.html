@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PASC 控制台</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2128; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .logo { font-weight: 700; font-size: 16px; letter-spacing: .5px; }
+  .logo small { color: var(--muted); font-weight: 400; margin-left: 8px; font-size: 12px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted);
+    background: var(--panel2);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.bad { background: var(--red); }
+  .dot.warn { background: var(--yellow); }
+  nav { display: flex; gap: 2px; padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; }
+  nav button {
+    background: none; border: none; color: var(--muted); padding: 10px 14px; cursor: pointer;
+    border-bottom: 2px solid transparent; font-size: 13px; white-space: nowrap;
+  }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 18px 20px 60px; max-width: 1240px; margin: 0 auto; }
+  section { display: none; }
+  section.active { display: block; }
+  .grid { display: grid; gap: 12px; }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+  }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card .v { font-size: 22px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .card .h { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .panel h3 { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .3px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input, textarea, select {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 9px; font: inherit; font-size: 13px; outline: none;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
+  button.btn {
+    background: #21262d; color: var(--text); border: 1px solid var(--border); border-radius: 7px;
+    padding: 7px 13px; cursor: pointer; font-size: 13px;
+  }
+  button.btn:hover { border-color: var(--accent); }
+  button.btn.primary { background: #1f6feb; border-color: #1f6feb; }
+  button.btn.primary:hover { background: #388bfd; }
+  button.btn.danger { color: var(--red); }
+  #log {
+    font-family: var(--mono); font-size: 12px; height: 340px; overflow-y: auto;
+    background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .ev { margin-bottom: 2px; }
+  .ev time { color: #6e7681; margin-right: 6px; }
+  .ev .tag { display: inline-block; min-width: 62px; font-weight: 600; }
+  .ev.message .tag { color: var(--accent); }
+  .ev.reply .tag { color: var(--green); }
+  .ev.judge .tag { color: var(--purple); }
+  .ev.prompt .tag { color: #79c0ff; }
+  .ev.execution .tag { color: var(--yellow); }
+  .ev.error .tag { color: var(--red); }
+  .ev.skip .tag { color: #6e7681; }
+  .ev.log .tag { color: #8b949e; }
+  .ev.status .tag { color: #8b949e; }
+  .ev.snapshot { display: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.time { color: var(--muted); white-space: nowrap; font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .toast {
+    position: fixed; right: 18px; bottom: 18px; background: var(--panel2); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 8px; max-width: 420px;
+    opacity: 0; transform: translateY(8px); transition: all .18s; pointer-events: none; z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: none; }
+  .toast.err { border-left-color: var(--red); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+  pre { background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+        overflow: auto; max-height: 380px; font-size: 12px; white-space: pre-wrap; }
+  .list-item { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--panel2); }
+  .list-item .t { font-size: 12.5px; }
+  .list-item .m { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .badge { display:inline-block; padding:1px 7px; border-radius:999px; font-size:11px;
+           background: #1f6feb22; color: #79c0ff; border:1px solid #1f6feb55; }
+  .badge.archived { background:#d2992222; color:#d29922; border-color:#d2992255; }
+  .badge.forgotten { background:#f8514922; color:#f85149; border-color:#f8514955; }
+  .bar { height:4px; border-radius:2px; background:#30363d; margin-top:4px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background: linear-gradient(90deg,#1f6feb,#58a6ff); }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">PASC <small>人格模拟智能体桥接器</small></div>
+  <span class="pill"><span class="dot" id="d-napcat"></span> NapCat <b id="v-napcat">-</b></span>
+  <span class="pill"><span class="dot" id="d-agent"></span> Agent <b id="v-agent">-</b></span>
+  <span class="pill">判断 <b id="v-judge">-</b></span>
+  <span class="pill">运行 <b id="v-uptime">-</b></span>
+</header>
+
+<nav>
+  <button data-tab="overview" class="active">概览</button>
+  <button data-tab="prompt">提示词与人格</button>
+  <button data-tab="messages">聊天记录</button>
+  <button data-tab="memory">记忆</button>
+  <button data-tab="extract">人格提纯</button>
+  <button data-tab="config">配置</button>
+</nav>
+
+<main>
+  <!-- 概览 -->
+  <section id="tab-overview" class="active">
+    <div class="grid cards" id="cards"></div>
+
+    <div class="split" style="margin-top:12px">
+      <div class="panel">
+        <h3>模拟一条消息(不需要 QQ)</h3>
+        <div class="row">
+          <input id="sim-text" placeholder="例如: 这个报错怎么解决啊" style="flex:1;min-width:220px" />
+          <input id="sim-group" value="123456" style="width:110px" title="群号" />
+          <button class="btn primary" id="sim-send">发送</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label class="muted" style="font-size:12px"><input type="checkbox" id="sim-force" checked /> 跳过判断, 强制回复</label>
+          <button class="btn" id="probe-agent">测试 Agent 连接</button>
+          <button class="btn" id="judge-test">试判断当前输入</button>
+        </div>
+        <div id="sim-out" class="muted" style="margin-top:8px;font-size:12px"></div>
+      </div>
+
+      <div class="panel">
+        <h3>实时事件</h3>
+        <div id="log"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 提示词 -->
+  <section id="tab-prompt">
+    <div class="split">
+      <div class="panel">
+        <h3>人格</h3>
+        <div class="row" style="margin-bottom:8px">
+          <select id="persona-select" style="flex:1"></select>
+          <button class="btn" id="persona-new">新建</button>
+        </div>
+        <input id="persona-name" placeholder="人格名称" style="width:100%;margin-bottom:8px" />
+        <input id="persona-desc" placeholder="一句话简介(给判断模型看)" style="width:100%;margin-bottom:8px" />
+        <textarea id="persona-content" rows="12" placeholder="人格描述 markdown"></textarea>
+        <input id="persona-file" placeholder="OpenClaw 人格 markdown 路径(留空用 openclaw.personaFile)" style="width:100%;margin-bottom:8px" />
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" id="persona-save">保存</button>
+          <button class="btn" id="persona-activate">设为当前</button>
+          <button class="btn" id="persona-export">导出到 OpenClaw</button>
+          <button class="btn danger" id="persona-del">删除</button>
+          <span class="muted" id="persona-status" style="font-size:12px"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Prompt 预览</h3>
+        <div class="row">
+          <input id="preview-text" placeholder="用这条消息跑一次构建, 不发送" style="flex:1;min-width:200px" />
+          <button class="btn" id="preview-run">构建</button>
+        </div>
+        <div class="muted" id="preview-meta" style="font-size:12px;margin:8px 0"></div>
+        <pre id="preview-system"></pre>
+        <pre id="preview-user"></pre>
+      </div>
+    </div>
+
+    <div class="split" style="margin-top:12px">
+      <div class="panel">
+        <h3>Few-shot 样本</h3>
+        <div class="row" style="margin-bottom:8px">
+          <input id="sample-q" placeholder="用户会怎么说" style="flex:1" />
+          <input id="sample-a" placeholder="希望它怎么回" style="flex:1" />
+          <button class="btn" id="sample-add">添加</button>
+        </div>
+        <div id="sample-list" style="max-height:260px;overflow:auto"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- 消息 -->
+  <section id="tab-messages">
+    <div class="panel">
+      <h3>聊天记录</h3>
+      <div class="row" style="margin-bottom:10px">
+        <input id="msg-scene" placeholder="sceneKey, 如 group:123456" style="width:220px" />
+        <input id="msg-keyword" placeholder="关键词(走全文检索)" style="width:200px" />
+        <button class="btn" id="msg-refresh">查询</button>
+        <span class="muted" id="msg-count" style="font-size:12px"></span>
+      </div>
+      <div class="row" style="margin-bottom:10px;padding-top:8px;border-top:1px solid var(--border)">
+        <span class="muted" style="font-size:12px">导入 QQ 聊天记录 (qq-chat-exporter 导出的 .json / .jsonl)</span>
+        <input id="import-path" placeholder="/Users/you/Downloads/xxx.json" style="flex:1;min-width:260px" />
+        <input id="import-group" placeholder="群号(可选)" style="width:130px" />
+        <label class="muted" style="font-size:12px"><input type="checkbox" id="import-dry" /> 试运行</label>
+        <button class="btn" id="import-run">导入</button>
+        <button class="btn" id="archive-stats">存档统计</button>
+      </div>
+      <div class="muted" id="import-result" style="font-size:12px;margin-bottom:8px"></div>
+      <div style="max-height:520px;overflow:auto">
+        <table>
+          <thead><tr><th style="width:96px">时间</th><th style="width:120px">会话</th><th style="width:140px">发送者</th><th>内容</th></tr></thead>
+          <tbody id="msg-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+
+
+  <!-- 记忆 -->
+  <section id="tab-memory">
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px">
+        <input id="mem-search-input" placeholder="召回测试: 输入一句话, 看看会捞到什么" style="flex:1;min-width:240px" />
+        <button class="btn primary" id="mem-search-btn">检索</button>
+        <button class="btn" id="mem-extract">从最近对话抽取</button>
+        <button class="btn" id="mem-decay">执行衰减</button>
+        <button class="btn" id="mem-refresh">刷新</button>
+      </div>
+      <div class="muted" id="mem-stats" style="font-size:12px"></div>
+    </div>
+
+    <div class="split" style="margin-top:12px">
+      <div class="panel">
+        <h3>记忆库 <span class="muted" id="mem-count" style="font-size:12px;font-weight:400"></span></h3>
+        <div id="mem-list" style="max-height:520px;overflow:auto"></div>
+      </div>
+      <div class="panel">
+        <h3>新增记忆</h3>
+        <textarea id="mem-text" rows="3" placeholder="一句完整的陈述, 例如: 阿琳在杭州读研, 养了只叫年糕的橘猫"></textarea>
+        <div class="row" style="margin-top:8px">
+          <select id="mem-type">
+            <option value="fact">事实 fact</option>
+            <option value="preference">偏好 preference</option>
+            <option value="relationship">关系 relationship</option>
+            <option value="plan">计划 plan</option>
+            <option value="event">事件 event</option>
+            <option value="unknown">未知 unknown</option>
+          </select>
+          <label class="muted" style="font-size:12px">重要性 <input type="range" id="mem-importance" min="0" max="1" step="0.05" value="0.6" /></label>
+          <span class="muted" id="mem-importance-val" style="font-size:12px">0.6</span>
+          <button class="btn primary" id="mem-add">添加</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:10px">
+          检索结果 = 相关性 × 重要性 × 新鲜度, 再乘以访问加成。<br />
+          新鲜度每天按 decayRate 指数衰减, 被访问过的记忆衰减更慢; 到期或生命力过低的记忆会归档而不是删除。
+        </div>
+        <div id="mem-hits" style="margin-top:10px;max-height:300px;overflow:auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 人格提纯 -->
+  <section id="tab-extract">
+    <div class="panel">
+      <h3>选择要提纯的对象</h3>
+      <div class="row">
+        <select id="ex-scene" style="min-width:200px"></select>
+        <select id="ex-user" style="min-width:200px"></select>
+        <label class="muted" style="font-size:12px"><input type="checkbox" id="ex-asks" /> 含反向问答(目标提问、别人回答)</label>
+        <button class="btn primary" id="ex-load">提取 Q/A</button>
+      </div>
+      <div class="muted" id="ex-meta" style="font-size:12px;margin-top:8px">先在「聊天记录」里积累一些消息, 或者用假 NapCat 跑一遍剧本。</div>
+    </div>
+
+    <div class="split" style="margin-top:12px">
+      <div class="panel">
+        <h3>Q/A 片段 <span class="muted" id="ex-count" style="font-size:12px;font-weight:400"></span></h3>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn" id="ex-import">导入为 few-shot 样本</button>
+          <button class="btn" id="ex-download">导出 txt</button>
+          <span class="muted" style="font-size:12px">默认按质量排序, 取消勾选可排除</span>
+        </div>
+        <div id="ex-list" style="max-height:460px;overflow:auto"></div>
+      </div>
+
+      <div class="panel">
+        <h3>人格提纯</h3>
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn primary" id="ex-distill">生成人格(模型/统计)</button>
+          <span class="muted" id="ex-draft-meta" style="font-size:12px"></span>
+        </div>
+        <input id="ex-name" placeholder="人格名称" style="width:100%;margin-bottom:6px" />
+        <input id="ex-desc" placeholder="一句话简介" style="width:100%;margin-bottom:6px" />
+        <textarea id="ex-draft" rows="14" placeholder="点上面的按钮生成草稿, 或者直接手写"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="ex-save">保存为新人格</button>
+          <button class="btn" id="ex-save-active">保存并启用</button>
+          <span class="muted" id="ex-save-status" style="font-size:12px"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 配置 -->
+  <section id="tab-config">
+    <div class="panel" style="margin-bottom:12px">
+      <h3>模型探测</h3>
+      <div class="row">
+        <button class="btn primary" id="probe-models">探测本地模型</button>
+        <span class="muted" id="probe-status" style="font-size:12px">会试 11434 / 1234 / 8000 / 8080 以及配置里已填的地址</span>
+      </div>
+      <div id="probe-result" style="margin-top:10px"></div>
+    </div>
+
+    <div class="panel">
+      <h3>配置(config.json)</h3>
+      <textarea id="config-text" rows="26" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="btn primary" id="config-save">保存并热生效</button>
+        <button class="btn" id="config-reload">重新加载</button>
+        <span class="muted" id="config-status" style="font-size:12px"></span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const state = { config: null, personas: [], activePersonaId: null, stats: null };
+
+function toast(msg, isErr = false) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'toast'; }, 3200);
+}
+
+async function api(path, opts = {}) {
+  const init = { ...opts };
+  if (init.body && typeof init.body !== 'string') {
+    init.body = JSON.stringify(init.body);
+    init.headers = { 'content-type': 'application/json', ...(init.headers || {}) };
+  }
+  const res = await fetch(path, init);
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('nav button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('section').forEach((s) => s.classList.remove('active'));
+    btn.classList.add('active');
+    $('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ---------- 概览 ---------- */
+function card(k, v, h = '') {
+  return `<div class="card"><div class="k">${k}</div><div class="v">${v}</div>${h ? `<div class="h">${h}</div>` : ''}</div>`;
+}
+
+function renderCards(s, extra) {
+  const judgeHitRate = s.judgeRuns ? Math.round((s.judgeHits / s.judgeRuns) * 100) : 0;
+  $('cards').innerHTML = [
+    card('收到消息', s.messagesIn, `被过滤 ${s.messagesFiltered}`),
+    card('判断次数', s.judgeRuns, `命中 ${s.judgeHits} (${judgeHitRate}%)`),
+    card('主动回复', s.replies, `直接唤醒 ${s.directTriggers}`),
+    card('Prompt 构建', s.promptBuilds, `约 ${s.estimatedTokens} tokens`),
+    card('动作执行', s.executions, `被拒 ${s.executionRejected}`),
+    card('错误', s.errors, s.lastError ? String(s.lastError).slice(0, 30) : ''),
+  ].join('');
+  if (extra) {
+    $('v-uptime').textContent = fmtDuration(s.uptimeMs);
+  }
+}
+
+function fmtDuration(ms) {
+  const sec = Math.floor(ms / 1000);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s2 = sec % 60;
+  return h > 0 ? `${h}h${m}m` : m > 0 ? `${m}m${s2}s` : `${s2}s`;
+}
+
+async function refreshStats() {
+  try {
+    const [st, health] = await Promise.all([api('/api/stats'), api('/api/health')]);
+    state.stats = st.stats;
+    renderCards(st.stats, true);
+    const napcatOk = health.napcat.status === 'connected';
+    $('d-napcat').className = 'dot ' + (napcatOk ? 'ok' : health.napcat.status === 'connecting' || health.napcat.status === 'reconnecting' ? 'warn' : 'bad');
+    $('v-napcat').textContent = health.napcat.protocol + '/' + health.napcat.status;
+    $('d-agent').className = 'dot ' + (health.agent.ok ? 'ok' : 'warn');
+    $('v-agent').textContent = health.agent.name;
+    $('v-judge').textContent = health.judge.mode === 'model' ? (health.judge.model || 'model') : '启发式';
+  } catch (err) {
+    toast('状态刷新失败: ' + err.message, true);
+  }
+}
+
+/* ---------- SSE ---------- */
+const logEl = $('log');
+function appendEvent(ev) {
+  if (ev.type === 'snapshot') return;
+  if (ev.type === 'log' && ev.data.level === 'debug') return;
+  const div = document.createElement('div');
+  div.className = 'ev ' + ev.type;
+  const t = new Date(ev.ts).toLocaleTimeString('zh-CN', { hour12: false });
+  div.innerHTML = `<time>${t}</time><span class="tag">${ev.type}</span>${formatEvent(ev)}`;
+  logEl.appendChild(div);
+  while (logEl.childNodes.length > 400) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function formatEvent(ev) {
+  const d = ev.data || {};
+  switch (ev.type) {
+    case 'message': return esc(`[${d.senderName}] ${d.text}`) + (d.mentionsSelf ? ' <span style="color:#d29922">@我</span>' : '');
+    case 'reply': return esc(d.text || '');
+    case 'judge': return `shouldReply=${d.shouldReply} conf=${Number(d.confidence).toFixed(2)} ${esc(d.reason || '')} <span class="muted">(${d.source})</span>`;
+    case 'prompt': return `${d.sections?.join('+') || ''} · ${d.chars}字 · ~${d.tokens} tokens · 触发=${d.reason}`;
+    case 'execution': return `${d.ok ? '✔' : '✘'} ${esc(d.action)} ${esc(d.reason || JSON.stringify(d.detail || ''))}`;
+    case 'skip': return esc(d.reason || '');
+    case 'error': return esc(d.error || d.msg || '');
+    case 'log': return `<span class="muted">[${esc(d.scope)}]</span> ${esc(d.msg)}`;
+    case 'status': return `napcat=${d.napcat}`;
+    default: return esc(JSON.stringify(d));
+  }
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  es.onmessage = (e) => {
+    try { appendEvent(JSON.parse(e.data)); } catch { /* ignore */ }
+  };
+  es.onerror = () => { es.close(); setTimeout(connectSSE, 3000); };
+}
+connectSSE();
+
+/* ---------- 模拟 ---------- */
+$('sim-send').onclick = async () => {
+  const text = $('sim-text').value.trim();
+  if (!text) return toast('先输入一句话', true);
+  try {
+    await api('/api/simulate', { method: 'POST', body: {
+      text, groupId: $('sim-group').value.trim() || '123456',
+      force: $('sim-force').checked,
+    }});
+    $('sim-out').textContent = '已投递, 看右侧事件流。';
+  } catch (err) { toast(err.message, true); }
+};
+
+$('probe-agent').onclick = async () => {
+  try {
+    const r = await api('/api/agent/probe', { method: 'POST' });
+    $('sim-out').textContent = (r.ok ? '✔ ' : '✘ ') + r.detail + (r.sample ? ` → ${r.sample}` : '');
+  } catch (err) { toast(err.message, true); }
+};
+
+$('judge-test').onclick = async () => {
+  const text = $('sim-text').value.trim() || '这个报错怎么解决啊';
+  try {
+    const r = await api('/api/judge/test', { method: 'POST', body: { text } });
+    $('sim-out').textContent = `判断结果: ${r.decision.shouldReply} (${Number(r.decision.confidence).toFixed(2)}) ${r.decision.reason} [${r.decision.source}]`;
+  } catch (err) { toast(err.message, true); }
+};
+
+/* ---------- 人格 ---------- */
+async function loadPersonas() {
+  const data = await api('/api/personas');
+  state.personas = data.items;
+  state.activePersonaId = data.activeId;
+  const sel = $('persona-select');
+  sel.innerHTML = data.items.map((p) => `<option value="${p.id}">${esc(p.name)}${p.id === data.activeId ? ' (当前)' : ''}</option>`).join('');
+  if (!data.items.length) { clearPersonaForm(); return; }
+  const current = data.items.find((p) => p.id === data.activeId) || data.items[0];
+  sel.value = current.id;
+  fillPersona(current);
+}
+
+function fillPersona(p) {
+  $('persona-name').value = p.name || '';
+  $('persona-desc').value = p.description || '';
+  $('persona-content').value = p.content || '';
+  $('persona-status').textContent = p.updatedAt ? '更新于 ' + new Date(p.updatedAt).toLocaleString('zh-CN') : '';
+}
+
+function clearPersonaForm() {
+  $('persona-name').value = '';
+  $('persona-desc').value = '';
+  $('persona-content').value = '';
+  $('persona-status').textContent = '';
+}
+
+$('persona-select').onchange = () => {
+  const p = state.personas.find((x) => x.id === $('persona-select').value);
+  if (p) fillPersona(p);
+};
+$('persona-new').onclick = () => { clearPersonaForm(); $('persona-name').focus(); };
+$('persona-save').onclick = async () => {
+  const name = $('persona-name').value.trim();
+  if (!name) return toast('人格名不能为空', true);
+  const existing = state.personas.find((x) => x.id === $('persona-select').value);
+  try {
+    await api('/api/personas', { method: 'POST', body: {
+      ...(existing ? { id: existing.id } : {}),
+      name,
+      description: $('persona-desc').value,
+      content: $('persona-content').value,
+    }});
+    await loadPersonas();
+    toast('人格已保存');
+  } catch (err) { toast(err.message, true); }
+};
+$('persona-activate').onclick = async () => {
+  const id = $('persona-select').value;
+  if (!id) return;
+  try { await api(`/api/personas/${id}/activate`, { method: 'POST' }); await loadPersonas(); toast('已设为当前人格'); }
+  catch (err) { toast(err.message, true); }
+};
+$('persona-del').onclick = async () => {
+  const id = $('persona-select').value;
+  if (!id || !confirm('确定删除这个人格?')) return;
+  try { await api(`/api/personas/${id}`, { method: 'DELETE' }); await loadPersonas(); toast('已删除'); }
+  catch (err) { toast(err.message, true); }
+};
+
+/* ---------- Prompt 预览 ---------- */
+$('preview-run').onclick = async () => {
+  const text = $('preview-text').value.trim() || '这个报错怎么解决啊';
+  try {
+    const r = await api('/api/prompt/preview', { method: 'POST', body: { text } });
+    const p = r.prompt;
+    $('preview-meta').textContent = `注入段落: ${p.sections.join(' / ')} · ${p.chars} 字符 · 约 ${p.estimatedTokens} tokens`;
+    $('preview-system').textContent = p.system;
+    $('preview-user').textContent = p.user;
+  } catch (err) { toast(err.message, true); }
+};
+
+/* ---------- 样本 / 记忆 ---------- */
+async function loadSamples() {
+  const { items } = await api('/api/samples?limit=100');
+  $('sample-list').innerHTML = items.length ? items.map((s) => `
+    <div class="list-item">
+      <div class="t">有人: ${esc(s.question)}</div>
+      <div class="t" style="color:#3fb950">你: ${esc(s.answer)}</div>
+      <div class="m">${esc((s.tags || []).join(',')) || '无标签'} · ${new Date(s.createdAt).toLocaleDateString('zh-CN')}
+        <a href="#" data-del-sample="${s.id}" style="color:#f85149;margin-left:8px">删除</a></div>
+    </div>`).join('') : '<div class="muted">还没有样本</div>';
+}
+
+function memBadge(m) {
+  const cls = m.status === 'archived' ? ' archived' : m.status === 'forgotten' ? ' forgotten' : '';
+  return `<span class="badge${cls}">${esc(m.type)}</span>`;
+}
+
+function renderMemories(items) {
+  $('mem-count').textContent = items.length ? `(${items.length})` : '';
+  $('mem-list').innerHTML = items.length
+    ? items.map((m) => `
+      <div class="list-item">
+        <div class="row" style="gap:6px">
+          ${memBadge(m)}
+          <span class="muted" style="font-size:11px">重要性 ${Number(m.importance).toFixed(2)} · 访问 ${m.accessCount} 次 · ${new Date(m.createdAt).toLocaleDateString('zh-CN')}</span>
+          ${m.status === 'active'
+            ? `<a href="#" data-mem-del="${m.id}" style="color:#f85149;margin-left:auto;font-size:11px">遗忘</a>`
+            : `<a href="#" data-mem-restore="${m.id}" style="color:#58a6ff;margin-left:auto;font-size:11px">恢复</a>`}
+        </div>
+        <div class="t" style="margin-top:4px">${esc(m.text)}</div>
+        <div class="bar"><i style="width:${Math.round(m.importance * 100)}%"></i></div>
+        ${(m.tags && m.tags.length) ? `<div class="m">${esc(m.tags.join(' · '))}</div>` : ''}
+      </div>`).join('')
+    : '<div class="muted">还没有记忆。可以手动添加, 或点「从最近对话抽取」（需要配置 distill 模型）。</div>';
+}
+
+function renderHits(hits) {
+  $('mem-hits').innerHTML = hits.length
+    ? `<div class="muted" style="font-size:11px;margin-bottom:6px">召回 ${hits.length} 条（分数 = 相关性×重要性×新鲜度，加权后）</div>` +
+      hits.map((h) => `
+      <div class="list-item">
+        <div class="row" style="gap:6px">
+          ${memBadge(h)}
+          <span class="muted" style="font-size:11px">score ${Number(h.score).toFixed(3)} · 相关 ${Number(h.keywordScore).toFixed(2)} / 向量 ${Number(h.vectorScore).toFixed(2)} · 新鲜 ${Number(h.freshness).toFixed(2)}</span>
+        </div>
+        <div class="t" style="margin-top:4px">${esc(h.text)}</div>
+      </div>`).join('')
+    : '<div class="muted">没有命中任何记忆。</div>';
+}
+
+async function loadMemories() {
+  try {
+    const [list, stats] = await Promise.all([api('/api/memories?limit=300'), api('/api/memory/stats')]);
+    $('mem-stats').textContent =
+      `共 ${stats.total} 条 · 活跃 ${stats.active} · 归档 ${stats.archived} · 已向量化 ${stats.embedded}` +
+      ` · ${stats.withEmbeddingModel ? '关键词 + 向量双路召回' : '关键词召回（未配置 Embedding）'}` +
+      ` · 平均重要性 ${Number(stats.avgImportance).toFixed(2)}`;
+    renderMemories(list.items);
+  } catch (err) { toast(err.message, true); }
+}
+
+$('mem-refresh').onclick = loadMemories;
+
+$('mem-search-btn').onclick = async () => {
+  const q = $('mem-search-input').value.trim();
+  if (!q) return toast('输入一句话', true);
+  try {
+    const r = await api('/api/memory/search?q=' + encodeURIComponent(q) + '&topK=8');
+    renderHits(r.hits);
+  } catch (err) { toast(err.message, true); }
+};
+
+$('mem-importance').oninput = () => { $('mem-importance-val').textContent = Number($('mem-importance').value).toFixed(2); };
+
+$('mem-add').onclick = async () => {
+  const text = $('mem-text').value.trim();
+  if (!text) return toast('内容不能为空', true);
+  try {
+    const r = await api('/api/memories', { method: 'POST', body: {
+      text, type: $('mem-type').value, importance: Number($('mem-importance').value),
+    }});
+    $('mem-text').value = '';
+    toast(r.merged ? '与已有记忆合并' : '已添加');
+    loadMemories();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('mem-extract').onclick = async () => {
+  try {
+    const r = await api('/api/memory/extract', { method: 'POST', body: {} });
+    toast(`抽取出 ${r.candidates} 条, 新增 ${r.added} 条, 合并 ${r.merged} 条`);
+    loadMemories();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('mem-decay').onclick = async () => {
+  try {
+    const r = await api('/api/memory/decay', { method: 'POST' });
+    toast(`衰减完成: 归档 ${r.archived} 条 (其中到期 ${r.expired} 条)`);
+    loadMemories();
+  } catch (err) { toast(err.message, true); }
+};
+
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement)) return;
+  if (t.dataset.delSample) {
+    e.preventDefault();
+    await api(`/api/samples/${t.dataset.delSample}`, { method: 'DELETE' });
+    loadSamples();
+  }
+  if (t.dataset.delMem) {
+    e.preventDefault();
+    await api(`/api/memories/${t.dataset.delMem}`, { method: 'DELETE' });
+    loadMemories();
+  }
+  if (t.dataset.memRestore) {
+    e.preventDefault();
+    await api(`/api/memories/${t.dataset.memRestore}/restore`, { method: 'POST' });
+    loadMemories();
+  }
+});
+
+$('sample-add').onclick = async () => {
+  const q = $('sample-q').value.trim(), a = $('sample-a').value.trim();
+  if (!q || !a) return toast('问题和回答都要填', true);
+  try { await api('/api/samples', { method: 'POST', body: { question: q, answer: a } });
+    $('sample-q').value = ''; $('sample-a').value = ''; loadSamples(); toast('已添加'); }
+  catch (err) { toast(err.message, true); }
+};
+
+$('mem-add').onclick = async () => {
+  const text = $('mem-text').value.trim();
+  if (!text) return;
+  try { await api('/api/memories', { method: 'POST', body: { text } });
+    $('mem-text').value = ''; loadMemories(); toast('已添加'); }
+  catch (err) { toast(err.message, true); }
+};
+
+/* ---------- 消息 ---------- */
+async function loadMessages() {
+  const qs = new URLSearchParams({ limit: '200', desc: '1' });
+  const scene = $('msg-scene').value.trim();
+  const kw = $('msg-keyword').value.trim();
+  if (scene) qs.set('sceneKey', scene);
+  if (kw) qs.set('keyword', kw);
+  try {
+    const { items, total } = await api('/api/messages?' + qs.toString());
+    $('msg-count').textContent = `共 ${total} 条, 显示 ${items.length} 条`;
+    $('msg-body').innerHTML = items.map((m) => `
+      <tr>
+        <td class="time">${new Date(m.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</td>
+        <td class="muted">${esc(m.sceneKey)}</td>
+        <td>${esc(m.senderName)} <span class="muted">${esc(m.senderId)}</span></td>
+        <td>${esc(m.text)}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">没有记录</td></tr>';
+  } catch (err) { toast(err.message, true); }
+}
+$('msg-refresh').onclick = loadMessages;
+
+
+/* ---------- 人格提纯 ---------- */
+const exState = { pairs: [], sceneKey: '', senderId: '' };
+
+async function loadExtractScenes() {
+  const { items } = await api('/api/scenes');
+  const sel = $('ex-scene');
+  sel.innerHTML = items.map((s) => `<option value="${s.sceneKey}">${esc(s.label)} (${s.totalMessages})</option>`).join('');
+  if (items.length) { exState.sceneKey = items[0].sceneKey; await loadExtractUsers(); }
+  else $('ex-user').innerHTML = '<option value="">暂无会话</option>';
+}
+
+async function loadExtractUsers() {
+  const sceneKey = $('ex-scene').value;
+  exState.sceneKey = sceneKey;
+  if (!sceneKey) return;
+  try {
+    const { items } = await api('/api/users?sceneKey=' + encodeURIComponent(sceneKey));
+    $('ex-user').innerHTML = items
+      .map((u) => `<option value="${u.senderId}">${esc(u.senderName)} (${u.senderId}) · ${u.count} 条</option>`)
+      .join('') || '<option value="">没有可用用户</option>';
+  } catch (err) { toast(err.message, true); }
+}
+
+function renderPairs() {
+  const list = $('ex-list');
+  if (!exState.pairs.length) {
+    list.innerHTML = '<div class="muted">没有提取到可用的问答对。可能是样本太少, 或该用户只发了表情/图片。</div>';
+    $('ex-count').textContent = '';
+    return;
+  }
+  $('ex-count').textContent = `共 ${exState.pairs.length} 条`;
+  list.innerHTML = exState.pairs.map((p, i) => `
+    <div class="list-item">
+      <div class="row" style="gap:6px">
+        <input type="checkbox" data-pair="${p.id}" checked />
+        <span class="muted" style="font-size:11px">#${i + 1} · ${p.link} · ${p.score}</span>
+      </div>
+      <div class="t" style="margin-top:4px">有人: ${esc(p.question)}</div>
+      <div class="t" style="color:#3fb950">${esc(p.target.name)}: ${esc(p.answer)}</div>
+    </div>`).join('');
+}
+
+function selectedPairIds() {
+  return [...document.querySelectorAll('#ex-list input[data-pair]')]
+    .filter((el) => el.checked)
+    .map((el) => el.getAttribute('data-pair'));
+}
+
+$('ex-scene').onchange = loadExtractUsers;
+$('ex-load').onclick = async () => {
+  const senderId = $('ex-user').value;
+  if (!senderId) return toast('先选一个用户', true);
+  exState.senderId = senderId;
+  try {
+    const qs = new URLSearchParams({
+      senderId,
+      sceneKey: $('ex-scene').value,
+      limit: '60',
+      ...($('ex-asks').checked ? { includeAsks: '1' } : {}),
+    });
+    const r = await api('/api/extract/qas?' + qs.toString());
+    exState.pairs = r.pairs;
+    renderPairs();
+    $('ex-meta').textContent =
+      `扫描 ${r.stats.scanned} 条消息, 目标发言 ${r.stats.targetUtterances} 段, 丢弃 ${r.stats.rejected} 段, 得到 ${r.pairs.length} 条问答对。`;
+  } catch (err) { toast(err.message, true); }
+};
+
+$('ex-import').onclick = async () => {
+  if (!exState.pairs.length) return toast('先提取', true);
+  try {
+    const r = await api('/api/extract/import', { method: 'POST', body: {
+      senderId: exState.senderId,
+      sceneKey: exState.sceneKey,
+      pairIds: selectedPairIds(),
+    }});
+    toast(`已导入 ${r.imported} 条样本, 样本库共 ${r.total} 条`);
+    loadSamples();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('ex-download').onclick = () => {
+  if (!exState.senderId) return toast('先提取', true);
+  const qs = new URLSearchParams({ senderId: exState.senderId, sceneKey: exState.sceneKey, format: 'txt' });
+  window.open('/api/extract/export?' + qs.toString(), '_blank');
+};
+
+$('ex-distill').onclick = async () => {
+  const senderId = $('ex-user').value;
+  if (!senderId) return toast('先选一个用户', true);
+  $('ex-draft-meta').textContent = '生成中...';
+  try {
+    const r = await api('/api/extract/distill', { method: 'POST', body: {
+      senderId, sceneKey: $('ex-scene').value, name: $('ex-name').value.trim() || undefined,
+    }});
+    const d = r.draft;
+    $('ex-draft').value = d.content;
+    $('ex-name').value = d.name;
+    $('ex-desc').value = d.description;
+    $('ex-draft-meta').textContent =
+      `${d.source === 'model' ? '模型生成' : '统计草稿'} · 用了 ${d.usedSamples} 条样本 · ${d.stats.messageCount} 条发言` +
+      (d.warnings && d.warnings.length ? ' · ' + d.warnings.join('; ') : '');
+  } catch (err) { $('ex-draft-meta').textContent = ''; toast(err.message, true); }
+};
+
+async function saveDraft(activate) {
+  const name = $('ex-name').value.trim();
+  const content = $('ex-draft').value.trim();
+  if (!name || !content) return toast('名称和人格内容都不能为空', true);
+  try {
+    const r = await api('/api/personas', { method: 'POST', body: {
+      name, description: $('ex-desc').value, content,
+    }});
+    if (activate) await api(`/api/personas/${r.persona.id}/activate`, { method: 'POST' });
+    await loadPersonas();
+    $('ex-save-status').textContent = activate ? '已保存并启用' : '已保存';
+    toast(activate ? '已保存并设为当前人格' : '已保存为新人格');
+  } catch (err) { toast(err.message, true); }
+}
+$('ex-save').onclick = () => saveDraft(false);
+$('ex-save-active').onclick = () => saveDraft(true);
+
+
+/* ---------- QCE 导入 / 存档统计 ---------- */
+$('import-run').onclick = async () => {
+  const filePath = $('import-path').value.trim();
+  if (!filePath) return toast('填一个服务器本地路径', true);
+  $('import-result').textContent = '导入中...';
+  try {
+    const r = await api('/api/import/qce', { method: 'POST', body: {
+      filePath,
+      ...($('import-group').value.trim() ? { groupId: $('import-group').value.trim() } : {}),
+      dryRun: $('import-dry').checked,
+    }});
+    $('import-result').textContent =
+      `${r.dryRun ? '[试运行] ' : ''}解析 ${r.imported + r.skipped} 条, 写入 ${r.imported} 条, 跳过 ${r.skipped} 条` +
+      ` · 会话 ${r.sceneKey}${r.chatName ? ' (' + r.chatName + ')' : ''} · 存档共 ${r.total} 条` +
+      (r.warnings?.length ? ' · 警告: ' + r.warnings.join('; ') : '');
+    if (!r.dryRun) { await loadMessages(); }
+  } catch (err) {
+    $('import-result').textContent = '导入失败: ' + err.message;
+    toast(err.message, true);
+  }
+};
+
+$('archive-stats').onclick = async () => {
+  try {
+    const s = await api('/api/archive/stats');
+    const top = (s.scenes || []).slice(0, 3).map((x) => `${x.sceneKey}(${x.count})`).join(', ');
+    $('import-result').textContent =
+      `driver=${s.driver}${s.fts !== undefined ? ' · fts=' + (s.fts ? '开' : '关') : ''} · 共 ${s.total} 条` +
+      (top ? ` · 主要会话: ${top}` : '') +
+      (s.days?.length ? ` · 最近 ${s.days.length} 天有数据` : '');
+  } catch (err) { toast(err.message, true); }
+};
+
+
+/* ---------- 人格导出到 OpenClaw ---------- */
+$('persona-export').onclick = async () => {
+  const id = $('persona-select').value;
+  if (!id) return toast('先选一个人格', true);
+  const path = $('persona-file').value.trim();
+  try {
+    const r = await api(`/api/personas/${id}/export`, { method: 'POST', body: path ? { path } : {} });
+    $('persona-status').textContent = `已导出 ${r.bytes} 字节 → ${r.file}`;
+    toast('人格已导出为 markdown');
+  } catch (err) { toast(err.message, true); }
+};
+
+/* ---------- 模型探测 ---------- */
+$('probe-models').onclick = async () => {
+  $('probe-status').textContent = '探测中...';
+  $('probe-result').innerHTML = '';
+  try {
+    const r = await api('/api/models/probe');
+    $('probe-status').textContent = r.endpoints.filter((e) => e.ok).length + ' 个端点可用';
+    if (!r.endpoints.length) { $('probe-result').innerHTML = '<div class="muted">没有可探测的端点</div>'; return; }
+
+    const usable = r.endpoints.filter((e) => e.ok && e.models.length);
+    const html = r.endpoints.map((e) => `
+      <div class="list-item">
+        <div class="row" style="gap:6px">
+          <span class="badge${e.ok && e.models.length ? '' : ' forgotten'}">${e.ok ? (e.models.length ? e.models.length + ' 个模型' : '无模型') : '不可用'}</span>
+          <span class="muted" style="font-size:11px">${esc(e.label)} · ${esc(e.baseURL)} · ${e.latencyMs}ms</span>
+        </div>
+        ${e.ok ? `<div class="m" style="margin-top:4px">${e.models.slice(0, 8).map((m) => `<code>${esc(m)}</code>`).join(' ')}${e.models.length > 8 ? ' …' : ''}</div>`
+                : `<div class="m" style="color:#f85149">${esc(e.error || '')}</div>`}
+      </div>`).join('');
+    $('probe-result').innerHTML = html + (usable.length ? `
+      <div class="row" style="margin-top:8px">
+        ${r.suggestion.judge ? `<button class="btn" data-apply="judge" data-url="${esc(r.suggestion.judge.baseURL)}" data-model="${esc(r.suggestion.judge.model)}">把 ${esc(r.suggestion.judge.model)} 设为判断模型</button>` : ''}
+        ${r.suggestion.distill ? `<button class="btn" data-apply="distill" data-url="${esc(r.suggestion.distill.baseURL)}" data-model="${esc(r.suggestion.distill.model)}">把 ${esc(r.suggestion.distill.model)} 设为提取模型</button>` : ''}
+      </div>` : '');
+  } catch (err) { $('probe-status').textContent = ''; toast(err.message, true); }
+};
+
+document.addEventListener('click', async (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLElement) || !t.dataset.apply) return;
+  try {
+    await api('/api/models/apply', { method: 'POST', body: {
+      target: t.dataset.apply, baseURL: t.dataset.url, model: t.dataset.model,
+    }});
+    toast(`已设为${t.dataset.apply === 'judge' ? '判断' : '提取'}模型, 配置已热生效`);
+    await loadConfig();
+  } catch (err) { toast(err.message, true); }
+});
+
+/* ---------- 配置 ---------- */
+async function loadConfig() {
+  state.config = await api('/api/config');
+  $('config-text').value = JSON.stringify(state.config, null, 2);
+}
+$('config-save').onclick = async () => {
+  let parsed;
+  try { parsed = JSON.parse($('config-text').value); }
+  catch (err) { $('config-status').textContent = 'JSON 语法错误: ' + err.message; return toast('JSON 语法错误', true); }
+  try {
+    await api('/api/config', { method: 'PUT', body: parsed });
+    $('config-status').textContent = '已保存 ' + new Date().toLocaleTimeString('zh-CN');
+    await loadConfig();
+    await refreshStats();
+    toast('配置已保存并热生效');
+  } catch (err) { $('config-status').textContent = err.message; toast(err.message, true); }
+};
+$('config-reload').onclick = loadConfig;
+
+/* ---------- 启动 ---------- */
+(async function boot() {
+  try {
+    await refreshStats();
+    await Promise.all([loadPersonas(), loadSamples(), loadMemories(), loadConfig(), loadMessages(), loadExtractScenes()]);
+  } catch (err) { toast('初始化失败: ' + err.message, true); }
+  setInterval(refreshStats, 5000);
+})();
+</script>
+</body>
+</html>

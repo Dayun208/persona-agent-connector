@@ -1,0 +1,20 @@
+{
+  "name": "@pasc/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx watch src/index.ts",
+    "start": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx src/index.ts",
+    "doctor": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx src/doctor.ts"
+  },
+  "dependencies": {
+    "@pasc/agent": "workspace:*",
+    "@pasc/core": "workspace:*",
+    "@pasc/napcat": "workspace:*"
+  }
+}
