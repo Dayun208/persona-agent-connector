@@ -10,3 +10,6 @@ coverage/
 
 # 内部部署记录与审计（含个人信息，不公开）
 docs/internal/
+
+# 本地镜像配置，不入库
+.npmrc
