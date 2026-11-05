@@ -10,6 +10,23 @@ export interface Persona {
   /** 人格描述 markdown, 直接注入 Prompt */
   content: string;
   updatedAt: number;
+  /** 这个人格从谁身上提纯（每个目标用户一份） */
+  distill?: PersonaDistillTarget;
+}
+
+export interface PersonaDistillTarget {
+  /** 只从这个会话抽；不填表示全部会话 */
+  sceneKey?: string;
+  /** 目标用户 QQ */
+  senderId: string;
+  /** 目标用户昵称（仅展示用） */
+  senderName?: string;
+  /** 自动提纯：目标用户攒够新发言后自动重跑 */
+  auto: boolean;
+  /** 上次提纯完成时间 */
+  lastRunAt?: number;
+  /** 上次提纯后又积累了多少条目标用户发言 */
+  lastMessageCount?: number;
 }
 
 interface PersonaDb {
@@ -83,6 +100,7 @@ export class PersonaStore {
       if (input.name !== undefined) existing.name = input.name;
       if (input.description !== undefined) existing.description = input.description;
       if (input.content !== undefined) existing.content = input.content;
+      if (input.distill !== undefined) existing.distill = input.distill;
       existing.updatedAt = Date.now();
       return existing;
     }
@@ -92,6 +110,7 @@ export class PersonaStore {
       description: input.description ?? '',
       content: input.content ?? '',
       updatedAt: Date.now(),
+      ...(input.distill ? { distill: input.distill } : {}),
     };
     this.db.items.push(persona);
     return persona;

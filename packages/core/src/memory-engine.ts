@@ -46,6 +46,8 @@ export interface MemoryRecord {
   /** 来源消息 id, 便于追溯 */
   sourceIds: string[];
   embedding?: number[];
+  /** 向量由哪个模型算出；换了模型后旧向量不可比，需要重建 */
+  embeddingModel?: string;
 }
 
 export interface MemorySearchHit extends MemoryHit {
@@ -99,6 +101,9 @@ export class MemoryEngine {
   private records: MemoryRecord[] = [];
   private flushTimer: NodeJS.Timeout | undefined;
   private dirty = false;
+
+  /** 懒回填节流：两次之间至少隔 60 秒 */
+  private lastLazyBackfill = 0;
 
   private constructor(
     private readonly file: string,
@@ -177,12 +182,79 @@ export class MemoryEngine {
     const embedder = this.deps.getEmbedder();
     if (embedder?.configured && this.deps.getConfig().enabled) {
       const vec = await embedder.embedQuiet(text);
-      if (vec) record.embedding = vec;
+      if (vec) {
+        record.embedding = vec;
+        record.embeddingModel = embedder.modelName;
+      }
     }
 
     this.records.push(record);
     await appendJsonl(this.file, record).catch(() => undefined);
     return { record, merged: false };
+  }
+
+  /**
+   * 回填向量。
+   *
+   * 需要它的场景：
+   *   - 记忆是在 Embedding 没配/离线的时候写进去的
+   *   - 换了 embedding 模型（旧向量和新的不可比）
+   *   - 从 JSONL 导入的历史数据
+   *
+   * @param opts.force 连已有的也重算
+   * @param opts.limit 本次最多处理多少条（大库分批用）
+   */
+  async backfill(
+    opts: { force?: boolean; limit?: number; batchSize?: number } = {},
+  ): Promise<{ scanned: number; updated: number; failed: number; remaining: number }> {
+    const embedder = this.deps.getEmbedder();
+    if (!embedder?.configured) return { scanned: 0, updated: 0, failed: 0, remaining: 0 };
+
+    const model = embedder.modelName;
+    const stale = this.records.filter((r) => {
+      if (opts.force) return true;
+      if (!r.embedding || r.embedding.length === 0) return true;
+      return r.embeddingModel !== model;
+    });
+    const work = opts.limit ? stale.slice(0, opts.limit) : stale;
+    const batchSize = Math.max(1, Math.min(64, opts.batchSize ?? 16));
+
+    let updated = 0;
+    let failed = 0;
+    for (let i = 0; i < work.length; i += batchSize) {
+      const chunk = work.slice(i, i + batchSize);
+      try {
+        const vectors = await embedder.embed(chunk.map((r) => r.text));
+        chunk.forEach((record, idx) => {
+          const vec = vectors[idx];
+          if (vec && vec.length > 0) {
+            record.embedding = vec;
+            record.embeddingModel = model;
+            updated += 1;
+          } else {
+            failed += 1;
+          }
+        });
+        if (updated > 0) this.markDirty(200);
+      } catch {
+        failed += chunk.length;
+      }
+    }
+    if (updated > 0) await this.flush();
+    return { scanned: work.length, updated, failed, remaining: stale.length - work.length };
+  }
+
+  /** 向量覆盖率与陈旧向量数（给控制台看） */
+  embeddingHealth(): { total: number; embedded: number; stale: number; model: string } {
+    const model = this.deps.getEmbedder()?.modelName ?? '';
+    let embedded = 0;
+    let stale = 0;
+    for (const r of this.records) {
+      const has = Boolean(r.embedding && r.embedding.length > 0);
+      if (has) embedded += 1;
+      if (!has || (model && r.embeddingModel !== model)) stale += 1;
+    }
+    return { total: this.records.length, embedded, stale, model };
   }
 
   /** 批量写入抽取结果 */
@@ -233,10 +305,24 @@ export class MemoryEngine {
     // 向量路(可选)
     let vectorScores: number[] | undefined;
     const embedder = this.deps.getEmbedder();
-    if (embedder?.configured && candidates.some((r) => r.embedding && r.embedding.length > 0)) {
-      const queryVec = await embedder.embedQuiet(q);
-      if (queryVec) {
-        vectorScores = candidates.map((r) => (r.embedding ? cosineSimilarity(queryVec, r.embedding) : 0));
+    if (embedder?.configured) {
+      // 懒回填：发现有没有向量（或向量是旧模型算的）的记录，就顺手补一批。
+      // 不阻塞本次检索——补完下一轮就生效，避免每次搜索都可能卡 30 秒超时。
+      const model = embedder.modelName;
+      const missing = candidates.filter((r) => !r.embedding || r.embedding.length === 0 || r.embeddingModel !== model);
+      if (missing.length > 0 && now - this.lastLazyBackfill > 60_000) {
+        this.lastLazyBackfill = now;
+        void this.backfill({ limit: 64 }).catch(() => undefined);
+      }
+
+      if (candidates.some((r) => r.embedding && r.embedding.length > 0)) {
+        const queryVec = await embedder.embedQuiet(q);
+        if (queryVec) {
+          // 没有向量的记录不该因为"缺数据"被清零——用它的关键词分当兜底证据
+          vectorScores = candidates.map((r, i) =>
+            r.embedding && r.embedding.length > 0 ? cosineSimilarity(queryVec, r.embedding) : (keywordScores[i] ?? 0) * 0.8,
+          );
+        }
       }
     }
 
@@ -444,6 +530,7 @@ function normalizeRecord(
     status: raw.status ?? 'active',
     sourceIds: Array.isArray(raw.sourceIds) ? raw.sourceIds : [],
     ...(Array.isArray(raw.embedding) ? { embedding: raw.embedding } : {}),
+    ...(typeof raw.embeddingModel === 'string' ? { embeddingModel: raw.embeddingModel } : {}),
   };
 }
 

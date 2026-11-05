@@ -88,6 +88,66 @@ export class EmbeddingClient {
   }
 }
 
+/**
+ * 向量质量自检。
+ *
+ * 有些本地推理框架（比如 oMLX）的 /embeddings 接口看着能通，
+ * 但对中文单字会返回完全相同的向量（"猫"/"狗"/"鱼" 相似度 1.0000），
+ * 整批文本都挤在一个窄锥里（两两相似度均值 0.69、标准差 0.07）。
+ * 这种向量拿去做召回是有害的——它会把所有记忆拉平成同一个分数。
+ *
+ * 判定规则：
+ *   1. 任意两组不同文本的相似度 ≥ 0.999 → 退化（等于没区分）
+ *   2. 两两相似度的标准差 < 0.02      → 退化（区分度过窄）
+ */
+export interface EmbeddingQuality {
+  ok: boolean;
+  reason?: string;
+  /** 两两相似度均值 */
+  meanSimilarity: number;
+  /** 两两相似度标准差 */
+  stdSimilarity: number;
+  /** 最高的一对 */
+  worstPair: [string, string, number] | null;
+}
+
+export async function checkEmbeddingQuality(
+  client: EmbeddingClient,
+  probes: string[] = ['猫', '狗', '量子力学', '今天想吃点好的', 'PASC 是 QQ 机器人中间件'],
+): Promise<EmbeddingQuality> {
+  const empty: EmbeddingQuality = { ok: false, reason: '未配置', meanSimilarity: 0, stdSimilarity: 0, worstPair: null };
+  if (!client.configured) return empty;
+
+  let vectors: number[][];
+  try {
+    vectors = await client.embed(probes);
+  } catch (err) {
+    return { ...empty, reason: `调用失败: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const valid = vectors.filter((v) => v.length > 0);
+  if (valid.length < 3) return { ...empty, reason: `只拿到 ${valid.length} 条向量` };
+
+  const sims: number[] = [];
+  let worst: [string, string, number] | null = null;
+  for (let i = 0; i < valid.length; i += 1) {
+    for (let j = i + 1; j < valid.length; j += 1) {
+      const s = cosineSimilarity(valid[i]!, valid[j]!);
+      sims.push(s);
+      if (!worst || s > worst[2]) worst = [probes[i] ?? `#${i}`, probes[j] ?? `#${j}`, s];
+    }
+  }
+  const mean = sims.reduce((a, b) => a + b, 0) / sims.length;
+  const std = Math.sqrt(sims.reduce((a, b) => a + (b - mean) ** 2, 0) / sims.length);
+
+  if (worst && worst[2] >= 0.999) {
+    return { ok: false, reason: `不同文本的向量几乎相同（「${worst[0]}」与「${worst[1]}」相似度 ${worst[2].toFixed(4)}）`, meanSimilarity: mean, stdSimilarity: std, worstPair: worst };
+  }
+  if (std < 0.02) {
+    return { ok: false, reason: `区分度过窄（两两相似度标准差 ${std.toFixed(4)}）`, meanSimilarity: mean, stdSimilarity: std, worstPair: worst };
+  }
+  return { ok: true, meanSimilarity: mean, stdSimilarity: std, worstPair: worst };
+}
+
 export function resolveEmbeddingEndpoint(baseURL: string): string {
   const base = baseURL.trim().replace(/\/+$/, '');
   if (!base) return '';

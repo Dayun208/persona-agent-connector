@@ -23,6 +23,14 @@ import sys
 import urllib.error
 import urllib.request
 
+# 优先读 scripts/.env.local（本地开发用，已 gitignore）
+_envfile = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.local")
+if os.path.exists(_envfile):
+    for _line in open(_envfile, encoding="utf-8"):
+        _k, _, _v = _line.strip().partition("=")
+        if _k and _v and not os.environ.get(_k):
+            os.environ[_k] = _v
+
 BASE = os.environ.get("TEST_NAPCAT_URL", "http://127.0.0.1:3100").rstrip("/")
 TOKEN = os.environ.get("TEST_NAPCAT_TOKEN", "")
 

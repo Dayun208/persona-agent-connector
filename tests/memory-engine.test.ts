@@ -199,3 +199,30 @@ describe('融合与相似度', () => {
     expect(cosineSimilarity([0, 0], [1, 0])).toBe(0);
   });
 });
+
+describe('embedding 回填', () => {
+  it('没有向量的记录会被补齐，且记录模型名', async () => {
+    const realCfg = normalizeConfig({ memory: { enabled: true } }).memory;
+    const embedder = {
+      configured: true,
+      modelName: 'fake-embed',
+      embed: async (texts: string[]) => texts.map((t) => [t.length, 1, 0]),
+      embedQuiet: async (t: string) => [t.length, 1, 0],
+    } as never;
+    const engine = await MemoryEngine.open(join(dir, 'memory.jsonl'), {
+      getConfig: () => realCfg,
+      getEmbedder: () => embedder,
+      now: () => clock,
+    });
+    lastEngine = engine;
+
+    await engine.add({ text: '测试记忆一条', type: 'fact', importance: 0.5 });
+    const before = engine.embeddingHealth();
+    expect(before.embedded).toBe(1);
+    expect(before.model).toBe('fake-embed');
+
+    const r = await engine.backfill({ force: true });
+    expect(r.updated).toBe(1);
+    expect(r.failed).toBe(0);
+  });
+});

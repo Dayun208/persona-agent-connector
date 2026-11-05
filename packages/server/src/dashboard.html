@@ -106,18 +106,19 @@
   .nav-item .soon { margin-left: auto; font-size: 10px; color: var(--faint); }
 
   .content { grid-area: content; overflow: hidden; padding: 18px; }
-  .panel { display: none; height: 100%; overflow: auto; }
-  .panel.active { display: block; animation: fade .18s ease; }
+  .panel { display: none; height: 100%; min-height: 0; overflow: hidden; }
+  .panel.active { display: flex; flex-direction: column; gap: var(--gap); animation: fade .18s ease; }
+  .panel.scroll.active { display: block; overflow: auto; }
   @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
   /* ---------- 通用组件 ---------- */
-  .card { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-card); padding: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-card); padding: 16px; min-height: 0; }
   .card h3 { margin: 0 0 12px; font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
   .muted { color: var(--muted); }
   .faint { color: var(--faint); }
   .mono { font-family: var(--mono); }
 
-  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--gap); margin-bottom: var(--gap); }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--gap); flex: 0 0 auto; }
   .stat { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-card); padding: 14px 16px; }
   .stat .k { font-size: 11.5px; color: var(--muted); letter-spacing: .3px; }
   .stat .v { font-size: 26px; font-weight: 650; font-family: var(--mono); margin-top: 4px; line-height: 1.1; }
@@ -127,10 +128,10 @@
   .stat.warn .v { color: var(--warn); }
   .stat.danger .v { color: var(--danger); }
 
-  .grid-2 { display: grid; grid-template-columns: 340px 1fr; gap: var(--gap); }
-  .col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; }
+  .grid-2 { display: grid; grid-template-columns: 340px 1fr; gap: var(--gap); flex: 1; min-height: 0; }
+  .col { display: flex; flex-direction: column; gap: var(--gap); min-height: 0; overflow: hidden; }
 
-  .list { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+  .list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; }
   .list-item {
     padding: 10px 12px; border-radius: 10px; cursor: pointer;
     display: flex; flex-direction: column; gap: 3px;
@@ -161,7 +162,7 @@
   .btn.sm { padding: 4px 9px; font-size: 12px; }
 
   /* ---------- 事件流 ---------- */
-  .events { display: flex; flex-direction: column; gap: 6px; overflow: auto; font-family: var(--mono); font-size: 12.5px; }
+  .events { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; overflow-x: hidden; font-family: var(--mono); font-size: 12.5px; }
   .ev { display: grid; grid-template-columns: 62px 46px 1fr; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 8px; }
   .ev:hover { background: var(--panel-2); }
   .ev .t { color: var(--faint); }
@@ -229,7 +230,7 @@
     border-bottom: 1px solid var(--border-soft);
   }
   .section-title:first-child { margin-top: 0; }
-  .check { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; }
+  .check { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 13px; min-height: 34px; }
   .check input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
   .check .warn { color: var(--warn); font-size: 11.5px; }
   .qalist { display: flex; flex-direction: column; gap: 8px; overflow: auto; }
@@ -410,7 +411,7 @@
         <div class="stat danger"><div class="k">错误</div><div class="v" id="s-err">0</div><div class="s" id="s-err-sub">拒绝 0 次</div></div>
       </div>
 
-      <div class="grid-2" style="height: calc(100vh - 56px - 36px - 116px - 18px);">
+      <div class="grid-2">
         <div class="col">
           <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
             <h3>会话 <span class="faint" id="scene-count"></span></h3>
@@ -430,7 +431,7 @@
 
     <!-- ============ 会话 ============ -->
     <section class="panel" id="view-sessions">
-      <div class="grid-2" style="height: calc(100vh - 56px - 36px);">
+      <div class="grid-2">
         <div class="col">
           <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
             <h3>会话列表</h3>
@@ -456,7 +457,7 @@
 
     <!-- ============ 人格 ============ -->
     <section class="panel" id="view-persona">
-      <div class="grid-2" style="grid-template-columns: 300px 1fr; height: calc(100vh - 56px - 36px);">
+      <div class="grid-2" style="grid-template-columns: 300px 1fr;">
         <div class="col">
           <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
             <h3>人格库</h3>
@@ -464,6 +465,18 @@
             <div style="display:flex; gap:8px; margin-top:12px;">
               <button class="btn sm" id="btn-persona-new">+ 新建</button>
               <button class="btn sm" id="btn-persona-import">导入 .md</button>
+            </div>
+          </div>
+
+          <div class="card" style="height:264px; flex:0 0 264px; display:flex; flex-direction:column; gap:8px; overflow:auto;">
+            <h3 style="margin:0;">提纯目标</h3>
+            <div class="field"><label>会话</label><select class="input" id="dis-scene"></select></div>
+            <div class="field"><label>目标用户</label><select class="input" id="dis-user"></select></div>
+            <label class="check"><input type="checkbox" id="dis-auto" /> 攒够新发言后自动提纯</label>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="faint" id="dis-last" style="font-size:11.5px;">未提纯</span>
+              <span class="spacer"></span>
+              <button class="btn sm" id="btn-dis-run">立即提纯</button>
             </div>
           </div>
         </div>
@@ -482,7 +495,7 @@
               <button class="btn sm primary" id="btn-persona-activate">设为当前</button>
             </div>
           </div>
-          <div class="card" style="height:210px; display:flex; flex-direction:column;">
+          <div class="card" style="height:264px; flex:0 0 264px; display:flex; flex-direction:column;">
             <div style="display:flex; align-items:center; gap:8px;">
               <h3 style="margin:0;">few-shot 样本 <span class="faint" id="sample-count"></span></h3>
               <span class="spacer"></span>
@@ -502,7 +515,18 @@
         <div class="stat accent"><div class="k">已向量化</div><div class="v" id="m-emb">0</div><div class="s" id="m-emb-sub">—</div></div>
         <div class="stat"><div class="k">平均重要度</div><div class="v" id="m-imp">0</div><div class="s">0 ~ 1</div></div>
       </div>
-      <div class="card" style="height: calc(100vh - 56px - 36px - 116px - 18px); display:flex; flex-direction:column;">
+      <div class="card" style="flex:0 0 auto; display:flex; align-items:center; gap:12px; padding:12px 16px;">
+        <span class="dot" id="emb-dot"></span>
+        <div style="flex:1; min-width:0;">
+          <div id="emb-title" style="font-weight:550;">向量召回</div>
+          <div class="faint" id="emb-detail" style="font-size:12px;">检查中…</div>
+        </div>
+        <span class="faint mono" id="emb-cover" style="font-size:12px;"></span>
+        <button class="btn sm" id="btn-emb-test">自检</button>
+        <button class="btn sm" id="btn-emb-backfill">重建索引</button>
+      </div>
+
+      <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
         <div style="display:flex; gap:8px; align-items:center;">
           <input class="input" id="mem-q" placeholder="语义检索记忆…（回车搜索）" style="max-width:420px;" />
           <button class="btn sm" id="btn-mem-search">搜索</button>
@@ -516,7 +540,7 @@
 
     <!-- ============ 提纯 ============ -->
     <section class="panel" id="view-extract">
-      <div class="grid-2" style="grid-template-columns: 340px 1fr; height: calc(100vh - 56px - 36px);">
+      <div class="grid-2" style="grid-template-columns: 340px 1fr;">
         <div class="col">
           <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:10px;">
             <h3>从聊天记录抽 Q/A</h3>
@@ -540,8 +564,8 @@
     </section>
 
     <!-- ============ 设置 ============ -->
-    <section class="panel" id="view-config">
-      <div class="card" style="max-width:900px;">
+    <section class="panel scroll" id="view-config">
+      <div class="card" style="max-width:1000px; margin:0 auto; width:100%;">
         <div class="section-title">连接</div>
         <div class="row2">
           <div class="field"><label>NapCat WS 地址</label><input class="input" id="c-napcat-addr" /></div>
@@ -714,7 +738,7 @@ function setView(view, opts) {
 
   if (view === 'sessions') { loadScenes(); if (activeScene) loadThread(); }
   if (view === 'persona') loadPersonas();
-  if (view === 'memory') loadMemory();
+  if (view === 'memory') { loadMemory(); loadEmbeddingHealth(); }
   if (view === 'extract') loadExtractScenes();
   if (view === 'config') loadConfig();
   if (view === 'overview') loadScenes();
@@ -979,7 +1003,13 @@ function connectSSE() {
     es.close();
     setTimeout(connectSSE, 3000);
   };
-  es.onmessage = (e) => { try { pushEvent(JSON.parse(e.data)); } catch (err) { /* ignore */ } };
+  es.onmessage = (e) => {
+    try {
+      const ev = JSON.parse(e.data);
+      if (ev && ev.type === 'snapshot') return; // 首帧是全量快照，不进事件流
+      pushEvent(ev);
+    } catch (err) { /* ignore */ }
+  };
 }
 
 /* ================= 弹窗 ================= */
@@ -1049,6 +1079,7 @@ function selectPersona(id) {
   $('#persona-content').value = p.content;
   $('#persona-meta').textContent = p.content.length + ' 字';
   renderPersonas();
+  renderDistill(p);
 }
 
 $('#btn-persona-new').onclick = () => {
@@ -1058,6 +1089,7 @@ $('#btn-persona-new').onclick = () => {
   $('#persona-content').value = '# 新人格\n\n';
   $('#persona-meta').textContent = '未保存';
   renderPersonas();
+  renderDistill(null);
 };
 
 $('#btn-persona-save').onclick = async () => {
@@ -1067,7 +1099,20 @@ $('#btn-persona-save').onclick = async () => {
   try {
     await api('/api/personas', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...(editingId ? { id: editingId } : {}), name, description: $('#persona-desc').value.trim(), content }),
+      body: JSON.stringify({
+        ...(editingId ? { id: editingId } : {}),
+        name,
+        description: $('#persona-desc').value.trim(),
+        content,
+        distill: $('#dis-user').value
+          ? {
+              ...($('#dis-scene').value ? { sceneKey: $('#dis-scene').value } : {}),
+              senderId: $('#dis-user').value,
+              senderName: ($('#dis-user').selectedOptions[0] || {}).textContent || '',
+              auto: $('#dis-auto').checked,
+            }
+          : null,
+      }),
     });
     toast('已保存'); await loadPersonas();
   } catch (e) { toast('保存失败：' + e.message); }
@@ -1112,6 +1157,68 @@ $('#btn-sample-add').onclick = async () => {
     await api('/api/samples', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: q, answer: a, source: 'manual' }) });
     toast('已添加'); loadSamples();
   } catch (e) { toast('添加失败：' + e.message); }
+};
+
+/* ================= 人格 · 提纯目标 ================= */
+let disScenes = [];
+let disUsers = [];
+
+async function loadDisScenes() {
+  if (disScenes.length) return disScenes;
+  try { disScenes = (await api('/api/scenes')).items || []; } catch (e) { disScenes = []; }
+  return disScenes;
+}
+
+async function renderDistill(persona) {
+  const sceneSel = $('#dis-scene');
+  const userSel = $('#dis-user');
+  const t = persona && persona.distill;
+
+  const scenes = await loadDisScenes();
+  sceneSel.innerHTML = '<option value="">全部会话</option>' + scenes
+    .map((x) => '<option value="' + esc(x.sceneKey) + '">' + esc(x.label) + '</option>').join('');
+  if (t && t.sceneKey) sceneSel.value = t.sceneKey;
+
+  await loadDisUsers(sceneSel.value, t ? t.senderId : '');
+  $('#dis-auto').checked = Boolean(t && t.auto);
+  $('#dis-last').textContent = t && t.lastRunAt
+    ? '上次提纯 ' + new Date(t.lastRunAt).toLocaleString('zh-CN', { hour12: false }).slice(5)
+    : '未提纯';
+  $('#btn-dis-run').disabled = !persona;
+}
+
+async function loadDisUsers(sceneKey, keepId) {
+  const sel = $('#dis-user');
+  sel.innerHTML = '<option value="">（加载中…）</option>';
+  try {
+    const qs = sceneKey ? '?sceneKey=' + encodeURIComponent(sceneKey) : '';
+    disUsers = (await api('/api/users' + qs)).items || [];
+  } catch (e) { disUsers = []; }
+  if (!disUsers.length) { sel.innerHTML = '<option value="">（这个会话还没有发言者）</option>'; return; }
+  sel.innerHTML = disUsers.map((u) =>
+    '<option value="' + esc(u.senderId) + '">' + esc(u.senderName) + ' · ' + esc(u.senderId) + '（' + u.count + ' 条）</option>'
+  ).join('');
+  if (keepId && disUsers.some((u) => u.senderId === keepId)) sel.value = keepId;
+}
+
+$('#dis-scene').onchange = (e) => loadDisUsers(e.target.value, '');
+
+$('#btn-dis-run').onclick = async () => {
+  if (!editingId) { toast('先保存人格再提纯'); return; }
+  const btn = $('#btn-dis-run');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '提纯中…';
+  try {
+    const r = await api('/api/personas/' + editingId + '/distill', { method: 'POST' });
+    toast(r.ok ? '提纯完成，配出 ' + (r.pairs || 0) + ' 对' : '提纯被拒绝：' + (r.error || ''));
+    await loadPersonas();
+  } catch (e) {
+    toast('提纯失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
 };
 
 async function loadSamples() {
@@ -1166,6 +1273,43 @@ function renderMemList(items) {
   $$('#mem-list [data-mdel]').forEach((b) => { b.onclick = async () => { try { await api('/api/memories/' + b.dataset.mdel, { method: 'DELETE' }); loadMemory(); } catch { toast('删除失败'); } }; });
   $$('#mem-list [data-restore]').forEach((b) => { b.onclick = async () => { try { await api('/api/memories/' + b.dataset.restore + '/restore', { method: 'POST' }); loadMemory(); } catch { toast('恢复失败'); } }; });
 }
+
+async function loadEmbeddingHealth() {
+  try {
+    const d = await api('/api/embedding/health');
+    const q = d.quality || {};
+    const h = d.health || {};
+    const ok = q.ok === true;
+    $('#emb-dot').className = 'dot ' + (ok ? 'ok' : q.checked ? 'bad' : 'warn');
+    $('#emb-title').textContent = ok ? '向量召回已启用' : q.checked ? '向量召回已停用（退化）' : '向量召回检查中';
+    $('#emb-detail').textContent = ok
+      ? `模型 ${h.model || '—'} · 区分度 σ=${q.stdSimilarity ?? '—'}`
+      : (q.reason || '未知原因');
+    $('#emb-cover').textContent = h.total ? `已向量化 ${h.embedded}/${h.total}${h.stale ? ` · 待重建 ${h.stale}` : ''}` : '';
+  } catch (e) { /* ignore */ }
+}
+
+$('#btn-emb-test').onclick = async () => {
+  const btn = $('#btn-emb-test');
+  btn.disabled = true; btn.textContent = '自检中…';
+  try {
+    const d = await api('/api/embedding/selftest', { method: 'POST' });
+    toast(d.ok ? '自检通过，向量可用' : '自检未通过：' + (d.reason || ''));
+    await loadEmbeddingHealth();
+  } catch (e) { toast('自检失败：' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '自检'; }
+};
+
+$('#btn-emb-backfill').onclick = async () => {
+  const btn = $('#btn-emb-backfill');
+  btn.disabled = true; btn.textContent = '重建中…';
+  try {
+    const d = await api('/api/memory/backfill', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true }) });
+    toast(`重建完成：${d.updated} 条，失败 ${d.failed}`);
+    await loadEmbeddingHealth(); loadMemory();
+  } catch (e) { toast('重建失败：' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '重建索引'; }
+};
 
 $('#btn-mem-search').onclick = async () => {
   const q = $('#mem-q').value.trim();

@@ -129,15 +129,49 @@ export function createApi(runtime: Runtime): Router {
     return { json: { activeId: store.activeId, items: store.list() } };
   });
 
+  router.post('/api/personas/:id/distill', async (ctx) => {
+    const id = ctx.params?.id ?? '';
+    if (!id) return { status: 400, json: { error: '缺少人格 id' } };
+    const r = await runtime.distillPersonaById(id);
+    if (!r.ok) return { status: 400, json: { error: r.error } };
+    const persona = runtime.stores.personas.get(id);
+    return { json: { ok: true, pairs: r.pairs ?? 0, persona } };
+  });
+
   router.post('/api/personas', async (ctx) => {
-    const body = (ctx.body ?? {}) as { id?: string; name?: string; description?: string; content?: string };
+    const body = (ctx.body ?? {}) as {
+      id?: string;
+      name?: string;
+      description?: string;
+      content?: string;
+      distill?: {
+        sceneKey?: string;
+        senderId?: string;
+        senderName?: string;
+        auto?: boolean;
+      } | null;
+    };
     if (!body.name || !body.name.trim()) return { status: 400, json: { error: 'name 不能为空' } };
     const store = runtime.stores.personas;
+    const previous = body.id ? store.get(body.id)?.distill : undefined;
+    const distill = body.distill === null
+      ? undefined
+      : body.distill && body.distill.senderId
+        ? {
+            ...(body.distill.sceneKey ? { sceneKey: body.distill.sceneKey } : {}),
+            senderId: body.distill.senderId,
+            ...(body.distill.senderName ? { senderName: body.distill.senderName } : {}),
+            auto: Boolean(body.distill.auto),
+            ...(previous?.lastRunAt ? { lastRunAt: previous.lastRunAt } : {}),
+            ...(previous?.lastMessageCount !== undefined ? { lastMessageCount: previous.lastMessageCount } : {}),
+          }
+        : previous;
     const persona = store.upsert({
       ...(body.id ? { id: body.id } : {}),
       name: body.name.trim(),
       ...(body.description !== undefined ? { description: body.description } : {}),
       ...(body.content !== undefined ? { content: body.content } : {}),
+      ...(distill ? { distill } : {}),
     });
     await store.flush();
     await runtime.autoSyncPersona(persona.id);
@@ -266,7 +300,9 @@ export function createApi(runtime: Runtime): Router {
     return { status: ok ? 200 : 404, json: { ok } };
   });
 
-  router.get('/api/memory/stats', async () => ({ json: runtime.stores.memories.stats() }));
+  router.get('/api/memory/stats', async () => ({
+    json: { ...runtime.stores.memories.stats(), health: runtime.stores.memories.embeddingHealth() },
+  }));
 
   router.get('/api/memory/search', async (ctx) => {
     const q = ctx.query.get('q') ?? '';
@@ -284,6 +320,30 @@ export function createApi(runtime: Runtime): Router {
     } catch (err) {
       return { status: 400, json: { error: err instanceof Error ? err.message : String(err) } };
     }
+  });
+
+  router.get('/api/embedding/health', async () => ({
+    json: {
+      quality: runtime.embeddingQuality,
+      health: runtime.stores.memories.embeddingHealth(),
+    },
+  }));
+
+  router.post('/api/embedding/selftest', async () => {
+    runtime.embeddingQuality = { checked: false, ok: false };
+    runtime.embeddingCheckPromise = undefined; // 强制重跑
+    await runtime.ensureEmbeddingQuality();
+    return { json: { ...runtime.embeddingQuality, health: runtime.stores.memories.embeddingHealth() } };
+  });
+
+  router.post('/api/memory/backfill', async (ctx) => {
+    const body = (ctx.body ?? {}) as { force?: boolean; limit?: number };
+    const result = await runtime.stores.memories.backfill({
+      ...(body.force ? { force: true } : {}),
+      ...(body.limit ? { limit: Number(body.limit) } : {}),
+    });
+    if (result.updated > 0) await runtime.stores.memories.flush();
+    return { json: { ok: true, ...result, health: runtime.stores.memories.embeddingHealth() } };
   });
 
   router.post('/api/memory/decay', async () => ({ json: { ok: true, ...runtime.stores.memories.decay() } }));
@@ -306,6 +366,38 @@ export function createApi(runtime: Runtime): Router {
       | 'manual';
     const bundle = await runtime.pipelineRef.previewPrompt(msg.value, reason);
     return { json: { prompt: bundle } };
+  });
+
+  // 通用对话通道：给外部脚本（如 QQ 自动回复）用，不经过消息池/判断
+  router.post('/api/agent/chat', async (ctx) => {
+    const body = (ctx.body ?? {}) as { text?: string; system?: string; history?: Array<{ role: string; content: string }> };
+    if (!body.text || !body.text.trim()) return { status: 400, json: { error: 'text 不能为空' } };
+    const historyText = (body.history ?? [])
+      .slice(-12)
+      .map((m) => `${m.role === 'user' ? '对方' : '你'}: ${m.content}`)
+      .join('\n');
+    const user = [historyText ? `【之前的对话】\n${historyText}` : '', `【最新一条】\n${body.text}`]
+      .filter(Boolean)
+      .join('\n\n');
+    const started = Date.now();
+    try {
+      const res = await runtime.getAgent().send({
+        system: body.system ?? '你是一个正常人，在 QQ 上和对方私聊。回复简短口语化，一到两句话，不要用列表或 markdown。',
+        user,
+        meta: { sceneKey: 'dsh:private', sceneLabel: 'QQ 私聊', triggerId: '', reason: 'manual' },
+      });
+      // agent（尤其 pasc-qq）会按 QQ 协议回 JSON，这里取出 message 字段
+      let text = res.text.trim();
+      try {
+        const parsed = JSON.parse(text) as { message?: unknown };
+        if (typeof parsed.message === 'string') text = parsed.message.trim();
+      } catch {
+        /* 不是 JSON 就用原文 */
+      }
+      return { json: { ok: true, text, latencyMs: Date.now() - started } };
+    } catch (err) {
+      return { status: 502, json: { ok: false, error: err instanceof Error ? err.message : String(err) } };
+    }
   });
 
   router.post('/api/agent/probe', async () => ({ json: await runtime.probeAgent() }));

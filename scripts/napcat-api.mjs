@@ -13,6 +13,18 @@
  *
  * 依赖：Node 22+ 自带 WebSocket，无需安装任何包。
  */
+// 本地开发：优先读 scripts/.env.local（已 gitignore）
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+try {
+  const envFile = join(dirname(fileURLToPath(import.meta.url)), '.env.local');
+  for (const line of readFileSync(envFile, 'utf8').split('\n')) {
+    const m = /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(line.trim());
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
+} catch { /* 没有就跳过 */ }
+
 const WS_URL = process.env.NAPCAT_WS || 'ws://127.0.0.1:3001';
 const TOKEN = process.env.NAPCAT_TOKEN || '';
 

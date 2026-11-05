@@ -37,7 +37,7 @@ import {
 import { NapCatClient, type NapCatStatus } from '@pasc/napcat';
 import { createAgentTransport, probeAgent, type AgentTransport } from '@pasc/agent';
 import { Pipeline, type PipelineEvent } from './pipeline.js';
-import { ExecutionLog } from '@pasc/core';
+import { ExecutionLog, distillPersona, extractQaPairs, extractionOptionsFrom, collectUserMessages } from '@pasc/core';
 
 export interface RuntimePaths {
   home: string;
@@ -108,6 +108,8 @@ export class Runtime {
   private configValue: PascConfig;
   private logger: Logger;
   private napcatClient!: NapCatClient;
+  private readonly distillBusy = new Set<string>();
+  private autoDistillTimer?: NodeJS.Timeout;
   private agentTransport!: AgentTransport;
   private pool!: MessagePool;
   private personas!: PersonaStore;
@@ -170,7 +172,8 @@ export class Runtime {
     this.samples = await SampleStore.open(this.paths.samplesFile, { seed: false });
     this.memories = await MemoryEngine.open(this.paths.memoryFile, {
       getConfig: () => this.configValue.memory,
-      getEmbedder: () => this.embeddingClient(),
+      // 自检没通过（向量退化）时返回 undefined，记忆引擎自动退回关键词召回
+      getEmbedder: () => (this.embeddingQuality.checked && !this.embeddingQuality.ok ? undefined : this.embeddingClient()),
       logger: this.logger.child('memory'),
     });
     this.archive = await this.openArchive(cfg);
@@ -231,6 +234,8 @@ export class Runtime {
     this.startedAt = Date.now();
     this.napcatClient.start();
     this.startDecayLoop();
+    this.startAutoDistillLoop();
+    void this.ensureEmbeddingQuality();
     this.logger.info('PASC 已启动', {
       home: this.paths.home,
       napcat: `${this.configValue.napcat.protocol} ${this.configValue.napcat.address}`,
@@ -499,6 +504,166 @@ export class Runtime {
   }
 
   /** 会话列表: 以存档为准(导入的历史也会出现在这里), 再叠加运行时判断/回复计数 */
+  /** 针对某个目标用户跑一次提纯，返回草稿（不落库） */
+  async distillFromTarget(input: {
+    senderId: string;
+    sceneKey?: string;
+    name?: string;
+    limit?: number;
+  }): Promise<{ draft: { name: string; description: string; content: string }; pairs: number; targetMessages: number } | { error: string }> {
+    const messages = this.sceneMessages(input.sceneKey);
+    const opts = extractionOptionsFrom(this.config.extraction, input.senderId, input.sceneKey);
+    const extracted = extractQaPairs(messages, { ...opts, ...(input.limit ? { maxPairs: input.limit } : {}) });
+    const target = collectUserMessages(messages, input.senderId);
+    if (extracted.pairs.length === 0 && target.length === 0) {
+      return { error: '这个用户在当前会话里没有可用发言' };
+    }
+    const targetName = target[0]?.senderName ?? input.senderId;
+    const draft = await distillPersona(
+      {
+        target: { id: input.senderId, name: input.name ?? targetName },
+        sceneKey: input.sceneKey ?? 'all',
+        pairs: extracted.pairs,
+        messages: target,
+      },
+      { getConfig: () => this.config.distill, getClient: () => this.distillClient() },
+    );
+    return { draft, pairs: extracted.pairs.length, targetMessages: target.length };
+  }
+
+  /** 对某个人格执行一次提纯并把结果写回人格正文 */
+  async distillPersonaById(id: string): Promise<{ ok: boolean; error?: string; pairs?: number }> {
+    const store = this.stores.personas;
+    const persona = store.get(id);
+    if (!persona) return { ok: false, error: '人格不存在' };
+    const t = persona.distill;
+    if (!t?.senderId) return { ok: false, error: '这个人格还没设置提纯目标用户' };
+
+    const r = await this.distillFromTarget({
+      senderId: t.senderId,
+      ...(t.sceneKey ? { sceneKey: t.sceneKey } : {}),
+      ...(t.senderName ? { name: t.senderName } : {}),
+    });
+    if ('error' in r) return { ok: false, error: r.error };
+
+    // 护栏 1：问答对是硬门槛 —— 没有"别人问、ta 答"的结构，提纯只会得到空话
+    const MIN_PAIRS = 8;
+    if (r.pairs < MIN_PAIRS) {
+      return {
+        ok: false,
+        error: `问答对太少（${r.pairs} 对，需要 ≥ ${MIN_PAIRS} 对）。这个会话里缺少"别人提问 → 目标回答"的结构，`
+          + '先去一个有对话的群，或调低 extraction 的配对要求',
+      };
+    }
+    // 护栏 2：草稿不能明显比现有内容短，避免用一页空话替换掉厚人格
+    const draftLen = r.draft.content.trim().length;
+    const oldLen = persona.content.trim().length;
+    if (draftLen < 400 || (oldLen > 600 && draftLen < oldLen * 0.6)) {
+      return { ok: false, error: `提纯结果太短（${draftLen} 字，现有 ${oldLen} 字），已放弃覆盖` };
+    }
+
+    // 覆盖前先把旧正文存一份，出问题能回滚
+    await this.backupPersona(persona.id, persona.content);
+
+    store.upsert({
+      id: persona.id,
+      name: persona.name,
+      description: r.draft.description || persona.description,
+      content: r.draft.content,
+      distill: { ...t, lastRunAt: Date.now(), lastMessageCount: 0 },
+    });
+    await store.flush();
+    this.logger.info('人格提纯完成', { persona: persona.name, pairs: r.pairs });
+    return { ok: true, pairs: r.pairs };
+  }
+
+  /** 覆盖人格前留一份旧正文 */
+  private async backupPersona(id: string, content: string): Promise<void> {
+    try {
+      const { mkdir, writeFile } = await import('node:fs/promises');
+      const dir = join(this.paths.dataDir, 'persona-history');
+      await mkdir(dir, { recursive: true });
+      const name = `${id}-${new Date().toISOString().replace(/[:.]/g, '-')}.md`;
+      await writeFile(join(dir, name), content, 'utf8');
+    } catch {
+      /* 备份失败不阻塞主流程 */
+    }
+  }
+
+  /** 自动提纯：目标用户攒够新发言就重跑 */
+  private startAutoDistillLoop(): void {
+    const run = async (): Promise<void> => {
+      for (const persona of this.stores.personas.list()) {
+        const t = persona.distill;
+        if (!t?.auto || !t.senderId || this.distillBusy.has(persona.id)) continue;
+        const since = t.lastRunAt ?? 0;
+        const fresh = this.stores.archive.query({
+          senderId: t.senderId,
+          ...(t.sceneKey ? { sceneKey: t.sceneKey } : {}),
+          ...(since ? { since } : {}),
+          limit: 500,
+        }).length;
+        if (fresh < 30) continue;
+        this.distillBusy.add(persona.id);
+        try {
+          const r = await this.distillPersonaById(persona.id);
+          if (!r.ok) this.logger.warn('自动提纯失败', { persona: persona.name, error: r.error });
+        } catch (err) {
+          this.logger.warn('自动提纯异常', { error: err instanceof Error ? err.message : String(err) });
+        } finally {
+          this.distillBusy.delete(persona.id);
+        }
+      }
+    };
+    this.autoDistillTimer = setInterval(() => void run(), 10 * 60 * 1000);
+    this.autoDistillTimer.unref?.();
+  }
+
+  /** 向量质量自检结果：坏掉的 embedding 不能用来做召回 */
+  embeddingQuality: { checked: boolean; ok: boolean; reason?: string; meanSimilarity?: number; stdSimilarity?: number } = {
+    checked: false,
+    ok: false,
+  };
+  embeddingCheckPromise?: Promise<void>;
+
+  async ensureEmbeddingQuality(): Promise<void> {
+    const embedder = this.embeddingClient();
+    if (!embedder?.configured) {
+      this.embeddingQuality = { checked: true, ok: false, reason: '未配置 embedding 模型' };
+      return;
+    }
+    if (this.embeddingQuality.checked) return;
+    this.embeddingCheckPromise ??= (async () => {
+      const { checkEmbeddingQuality } = await import('@pasc/core');
+      const q = await checkEmbeddingQuality(embedder);
+      this.embeddingQuality = {
+        checked: true,
+        ok: q.ok,
+        ...(q.reason ? { reason: q.reason } : {}),
+        meanSimilarity: Number(q.meanSimilarity.toFixed(3)),
+        stdSimilarity: Number(q.stdSimilarity.toFixed(3)),
+      };
+      if (!q.ok) {
+        this.logger.warn('Embedding 自检未通过，已停用向量召回，改用关键词', {
+          reason: q.reason,
+          mean: q.meanSimilarity.toFixed(3),
+          std: q.stdSimilarity.toFixed(4),
+        });
+      } else {
+        this.logger.info('Embedding 自检通过', {
+          mean: q.meanSimilarity.toFixed(3),
+          std: q.stdSimilarity.toFixed(4),
+        });
+      }
+    })();
+    await this.embeddingCheckPromise;
+  }
+
+  /** 供外部脚本使用的一次性对话通道 */
+  getAgent(): AgentTransport {
+    return this.agent;
+  }
+
   /** 当前账号的好友（离线时返回空数组） */
   async listFriends(): Promise<Array<{ userId: string; nickname: string; remark: string }>> {
     try {
