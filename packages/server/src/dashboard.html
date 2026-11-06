@@ -791,8 +791,20 @@ const clock = (ts) => new Date(ts).toTimeString().slice(0, 8);
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
-  if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
-  return res.json();
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try { data = JSON.parse(text); } catch (e) { data = { raw: text }; }
+  }
+  if (!res.ok) {
+    // 服务端的错误信息往往才是真正有用的（"问答对太少（0 对…）"），
+    // 以前只抛 "400 Bad Request"，用户根本不知道错在哪
+    const msg = (data && (data.error || data.message)) || res.statusText || ('HTTP ' + res.status);
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return data ?? {};
 }
 function toast(msg) {
   const el = $('#toast');

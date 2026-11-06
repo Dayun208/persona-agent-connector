@@ -537,6 +537,17 @@ export function createApi(runtime: Runtime): Router {
     if (extracted.pairs.length === 0 && extracted.targetMessages === 0) {
       return { status: 400, json: { error: '这个用户在当前会话里没有可用发言' } };
     }
+    // 没有问答结构时提纯只能写出空话，别浪费一次模型调用（也省 20 多秒）
+    const MIN_PAIRS = 8;
+    if (extracted.pairs.length < MIN_PAIRS) {
+      return {
+        status: 400,
+        json: {
+          error: `问答对太少（${extracted.pairs.length} 对，需要 ≥ ${MIN_PAIRS} 对）。换个有对话的用户，`
+            + '或先点「生成候选」确认这个用户有没有"别人问、ta 答"的记录',
+        },
+      };
+    }
 
     const messages = runtime.sceneMessages(sceneKey);
     const target = collectUserMessages(messages, body.senderId);

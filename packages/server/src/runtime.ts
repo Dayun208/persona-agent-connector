@@ -592,13 +592,23 @@ export class Runtime {
     sceneKey?: string;
     name?: string;
     limit?: number;
-  }): Promise<{ draft: { name: string; description: string; content: string }; pairs: number; targetMessages: number } | { error: string }> {
+    /** 少于这个配对数就不要浪费一次模型调用，直接返回错误 */
+    minPairs?: number;
+  }): Promise<{ draft: { name: string; description: string; content: string }; pairs: number; targetMessages: number } | { error: string; pairs?: number }> {
     const messages = this.sceneMessages(input.sceneKey);
     const opts = extractionOptionsFrom(this.config.extraction, input.senderId, input.sceneKey);
     const extracted = extractQaPairs(messages, { ...opts, ...(input.limit ? { maxPairs: input.limit } : {}) });
     const target = collectUserMessages(messages, input.senderId);
     if (extracted.pairs.length === 0 && target.length === 0) {
-      return { error: '这个用户在当前会话里没有可用发言' };
+      return { error: '这个用户在当前会话里没有可用发言', pairs: 0 };
+    }
+    // 先做门槛检查再调模型：0 对的时候白跑一次要 20 多秒，用户只会看到一个 400
+    if (input.minPairs !== undefined && extracted.pairs.length < input.minPairs) {
+      return {
+        error: `问答对太少（${extracted.pairs.length} 对，需要 ≥ ${input.minPairs} 对）。这个会话里缺少\"别人提问 → 目标回答\"的结构，`
+          + '先去一个有对话的群，或调低 extraction 的配对要求',
+        pairs: extracted.pairs.length,
+      };
     }
     const targetName = target[0]?.senderName ?? input.senderId;
     const draft = await distillPersona(
@@ -621,22 +631,15 @@ export class Runtime {
     const t = persona.distill;
     if (!t?.senderId) return { ok: false, error: '这个人格还没设置提纯目标用户' };
 
+    // 护栏 1：问答对是硬门槛 —— 没有"别人问、ta 答"的结构，提纯只会得到空话
+    const MIN_PAIRS = 8;
     const r = await this.distillFromTarget({
       senderId: t.senderId,
       ...(t.sceneKey ? { sceneKey: t.sceneKey } : {}),
       ...(t.senderName ? { name: t.senderName } : {}),
+      minPairs: MIN_PAIRS,
     });
     if ('error' in r) return { ok: false, error: r.error };
-
-    // 护栏 1：问答对是硬门槛 —— 没有"别人问、ta 答"的结构，提纯只会得到空话
-    const MIN_PAIRS = 8;
-    if (r.pairs < MIN_PAIRS) {
-      return {
-        ok: false,
-        error: `问答对太少（${r.pairs} 对，需要 ≥ ${MIN_PAIRS} 对）。这个会话里缺少"别人提问 → 目标回答"的结构，`
-          + '先去一个有对话的群，或调低 extraction 的配对要求',
-      };
-    }
     // 护栏 2：草稿不能明显比现有内容短，避免用一页空话替换掉厚人格
     const draftLen = r.draft.content.trim().length;
     const oldLen = persona.content.trim().length;
