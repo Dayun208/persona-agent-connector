@@ -437,11 +437,21 @@ export class Pipeline {
    * 到期自动恢复，避免忘了关。
    */
   private handleDevCommand(msg: ChatMessage, cfg: PascConfig): boolean {
-    const prefix = (cfg.devMode?.prefix || '#dev').trim();
+    const configured = (cfg.devMode?.prefix || '#dev').trim();
     // 群里发命令一般会先 @ 机器人，文本里带着 "@2959515696 #dev"，
     // 所以要把开头的 @ 段剥掉再判断
     const text = msg.text.replace(/^\s*(?:@\S+\s+)+/, '').trim();
-    if (!text.startsWith(prefix)) return false;
+
+    // 前缀放宽：配置值之外，也接受 /dev、!dev、dev（都不带符号的裸写法）
+    const prefixes = [...new Set([configured, '#dev', '/dev', '!dev', 'dev'])].filter(Boolean);
+    const lower = text.toLowerCase();
+    const prefix = prefixes.find((p) => {
+      if (!lower.startsWith(p)) return false;
+      const rest = lower.slice(p.length);
+      // "dev" 这种裸前缀必须紧跟空白或结束，避免把 "developer" 当成命令
+      return rest.length === 0 || /^[\s#/!]/.test(rest) || p !== 'dev';
+    });
+    if (!prefix) return false;
 
     const { napcat, logger, emit } = this.deps;
     const sub = text.slice(prefix.length).trim().toLowerCase();
@@ -491,7 +501,7 @@ export class Pipeline {
       `判断：阈值 ${cfg.judgeModel.replyThreshold} / 每 ${cfg.judgeModel.judgeEveryN} 条 / 冷却 ${Math.round(cfg.judgeModel.replyCooldownMs / 1000)}s`,
       `注入：人格${cfg.prompt.inject.persona ? '✓' : '✗'} 样本${cfg.prompt.inject.samples ? '✓' : '✗'} 记忆${cfg.prompt.inject.memory ? '✓' : '✗'} 历史${cfg.prompt.inject.history ? '✓' : '✗'}`,
       `联网：${cfg.openclaw.webSearch ? '开' : '关'}　识图：${cfg.vision.enabled ? cfg.vision.mode : '关'}`,
-      `用法：${prefix} on|off ｜ ${prefix} ask <文本> ｜ ${prefix} judge <文本> ｜ ${prefix} prompt <文本>`,
+      `用法：dev on|off ｜ dev ask <文本> ｜ dev judge <文本> ｜ dev prompt <文本>（#、/、! 前缀都认）`,
     ].join('\n'));
     return true;
   }
