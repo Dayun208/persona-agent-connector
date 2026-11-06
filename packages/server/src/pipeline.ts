@@ -436,7 +436,9 @@ export class Pipeline {
    */
   private handleDevCommand(msg: ChatMessage, cfg: PascConfig): boolean {
     const prefix = (cfg.devMode?.prefix || '#dev').trim();
-    const text = msg.text.trim();
+    // 群里发命令一般会先 @ 机器人，文本里带着 "@2959515696 #dev"，
+    // 所以要把开头的 @ 段剥掉再判断
+    const text = msg.text.replace(/^\s*(?:@\S+\s+)+/, '').trim();
     if (!text.startsWith(prefix)) return false;
 
     const { napcat, logger, emit } = this.deps;

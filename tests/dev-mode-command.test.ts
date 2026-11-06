@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeConfig } from '@pasc/core';
-import { Pipeline } from '../packages/server/src/pipeline.ts';
+import { Pipeline } from '../packages/server/src/pipeline';
 
 function makePipeline(admins: string[]) {
   const cfg = normalizeConfig({
@@ -60,5 +60,21 @@ describe('开发模式命令', () => {
     await pipeline.ingest(msg('999', '#dev'));
     expect(sent.join()).toContain('开发模式');
     expect(sent.join()).toContain('阈值');
+  });
+});
+
+describe('@ 前缀', () => {
+  it('群里 @机器人 再打命令也能识别', async () => {
+    const { pipeline, sent } = makePipeline(['999']);
+    await pipeline.ingest(msg('999', '@2959515696 #dev on'));
+    expect(pipeline.isDevMode('group:1')).toBe(true);
+    expect(sent.join()).toContain('开发模式已开');
+  });
+
+  it('不相关的 @ 消息不会被误判成命令', async () => {
+    const { pipeline, sent } = makePipeline(['999']);
+    await pipeline.ingest(msg('999', '@2959515696 今天吃什么'));
+    expect(pipeline.isDevMode('group:1')).toBe(false);
+    expect(sent.join()).not.toContain('开发模式');
   });
 });
