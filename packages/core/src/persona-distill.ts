@@ -52,7 +52,13 @@ const CLAUSE_SPLIT = /[，,。.！!？?；;：:、\s]+/;
 
 /** 去掉 [图片] 之类的占位符, 只留真正说出口的内容 */
 export function spokenText(text: string): string {
-  return text.replace(/\[[^\]]*\]/g, '').trim();
+  return text
+    // 去掉 [图片] [动画表情] 这类占位符
+    .replace(/\[[^\]]*\]/g, '')
+    // 去掉 @QQ号：对人设分析没有意义，还会污染样本
+    .replace(/@\d{5,}/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 /**

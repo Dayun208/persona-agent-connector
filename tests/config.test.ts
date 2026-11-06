@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, deepMerge, normalizeConfig, resolveEndpoint } from '@pasc/core';
+import { findUnknownConfigKeys } from '@pasc/core';
 
 describe('配置', () => {
   it('空配置也能补全成完整配置', () => {
@@ -42,5 +43,20 @@ describe('resolveEndpoint', () => {
 
   it('已经是完整端点时原样返回', () => {
     expect(resolveEndpoint('https://x.com/v1/chat/completions/')).toBe('https://x.com/v1/chat/completions');
+  });
+});
+
+describe('findUnknownConfigKeys', () => {
+  it('拼错的顶层键能被发现', () => {
+    expect(findUnknownConfigKeys({ vison: {} })).toContain('vison');
+  });
+
+  it('嵌套层级拼错也能发现', () => {
+    const keys = findUnknownConfigKeys({ vision: { api: { modle: 'x' } } });
+    expect(keys).toContain('vision.api.modle');
+  });
+
+  it('合法配置不报未知键', () => {
+    expect(findUnknownConfigKeys({ vision: { enabled: true }, behavior: { allowPoke: false } })).toEqual([]);
   });
 });

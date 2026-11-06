@@ -428,6 +428,68 @@ export function deepMerge<T>(base: T, override: unknown): T {
 }
 
 /** 把任意输入(部分配置/旧配置)补齐 + 校验成完整配置, 失败时抛出 readable 错误 */
+/**
+ * 找出配置里"schema 不认识的键"。
+ *
+ * 之前 zod 会静默丢弃未知字段 —— 把 vision 写成 "vison" 不会报错，
+ * 只是配置永远不生效，排查起来非常费劲。这里递归对照 schema，
+ * 把拼错的、放错层级的键都揪出来（只在加载时告警，不阻断启动）。
+ */
+export function findUnknownConfigKeys(input: unknown): string[] {
+  interface ZodDefLike {
+    typeName?: string;
+    shape?: () => Record<string, unknown>;
+    innerType?: unknown;
+    schema?: unknown;
+    type?: unknown;
+    valueType?: unknown;
+  }
+  const unknown: string[] = [];
+
+  const walk = (schema: unknown, value: unknown, path: string): void => {
+    const def = (schema as { _def?: ZodDefLike } | undefined)?._def;
+    if (!def || value === undefined || value === null) return;
+
+    switch (def.typeName) {
+      case 'ZodObject': {
+        if (typeof value !== 'object' || Array.isArray(value)) return;
+        const shape = def.shape?.() ?? {};
+        for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+          const childPath = path ? `${path}.${key}` : key;
+          if (!(key in shape)) {
+            unknown.push(childPath);
+            continue;
+          }
+          walk(shape[key], child, childPath);
+        }
+        return;
+      }
+      case 'ZodDefault':
+      case 'ZodOptional':
+      case 'ZodNullable':
+      case 'ZodEffects':
+        walk(def.innerType ?? def.schema, value, path);
+        return;
+      case 'ZodArray':
+        if (!Array.isArray(value)) return;
+        for (const item of value) walk(def.type ?? def.valueType, item, `${path}[]`);
+        return;
+      case 'ZodRecord': {
+        if (typeof value !== 'object' || Array.isArray(value)) return;
+        for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+          walk(def.valueType, child, path ? `${path}.${key}` : key);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  };
+
+  walk(PascConfigSchema, input, '');
+  return unknown;
+}
+
 export function normalizeConfig(input: unknown): PascConfig {
   const merged = deepMerge(DEFAULT_CONFIG, input ?? {});
   const result = PascConfigSchema.safeParse(merged);

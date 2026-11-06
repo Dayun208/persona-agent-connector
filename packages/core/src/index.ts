@@ -33,3 +33,5 @@ export * from './execution-log.js';
 export * from './pair-filter.js';
 
 export * from './vision.js';
+
+export * from './audit-log.js';

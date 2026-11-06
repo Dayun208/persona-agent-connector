@@ -122,6 +122,11 @@ export function createApi(runtime: Runtime): Router {
     return { json: { items } };
   });
 
+  router.get('/api/audits', async (ctx) => {
+    const limit = clampInt(ctx.query.get('limit'), 100, 1, 500);
+    return { json: { items: await runtime.recentAudits(limit) } };
+  });
+
   router.get('/api/scenes', async () => ({ json: { items: runtime.sceneSummaries() } }));
 
   // ---------------- 人格 ----------------

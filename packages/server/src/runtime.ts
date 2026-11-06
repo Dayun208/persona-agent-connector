@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ActionGuard,
@@ -38,7 +39,7 @@ import { NapCatClient, type NapCatStatus } from '@pasc/napcat';
 import { createAgentTransport, probeAgent, type AgentTransport } from '@pasc/agent';
 import type { CompleteOptions, LlmMessage } from '@pasc/core';
 import { Pipeline, type PipelineEvent } from './pipeline.js';
-import { ExecutionLog, distillPersona, extractQaPairs, extractEpisode, extractionOptionsFrom, collectUserMessages, type TextCompleter } from '@pasc/core';
+import { findUnknownConfigKeys, ExecutionLog, AuditLog, distillPersona, extractQaPairs, extractEpisode, extractionOptionsFrom, collectUserMessages, type TextCompleter, type AuditRecord } from '@pasc/core';
 
 export interface RuntimePaths {
   home: string;
@@ -51,6 +52,7 @@ export interface RuntimePaths {
   databaseFile: string;
   logFile: string;
   executionsFile: string;
+  auditFile: string;
 }
 
 export function resolvePaths(home: string): RuntimePaths {
@@ -66,6 +68,7 @@ export function resolvePaths(home: string): RuntimePaths {
     databaseFile: join(dataDir, 'pasc.db'),
     logFile: join(home, 'logs', 'pasc.log'),
     executionsFile: join(dataDir, 'executions.jsonl'),
+    auditFile: join(dataDir, 'audit.jsonl'),
   };
 }
 
@@ -127,6 +130,7 @@ export class Runtime {
   private builder!: PromptBuilder;
   private pipeline!: Pipeline;
   private startedAt = Date.now();
+  private readonly audit: AuditLog;
   private napcatStatus: NapCatStatus = 'idle';
 
   private constructor(
@@ -135,12 +139,19 @@ export class Runtime {
   ) {
     this.paths = resolvePaths(home);
     this.executions = new ExecutionLog(this.paths.executionsFile);
+    this.audit = new AuditLog(this.paths.auditFile);
     this.configValue = config;
     this.logger = Logger.root({
       level: config.log.level,
       file: config.log.file || '',
       bufferSize: config.log.bufferSize,
     });
+
+    // 配置里拼错的键会被 zod 静默丢弃，这里主动报出来
+    const unknownKeys = this.unknownConfigKeys(home);
+    if (unknownKeys.length > 0) {
+      this.logger.warn('配置里有未知字段（不会生效）', { keys: unknownKeys });
+    }
   }
 
   static async create(home: string): Promise<Runtime> {
@@ -331,6 +342,7 @@ export class Runtime {
       logger: this.logger.child('pipeline'),
       emit: (event) => this.bus.publish(event),
       statusReport: (topic) => this.statusReport(topic),
+      audit: (record) => this.recordAudit(record),
       executions: this.executions,
     });
   }
@@ -959,6 +971,37 @@ export class Runtime {
    * 给 QQ 命令用的状态报告。
    * 全部读本地真实状态，不经过大模型 —— 所以准确、即时、零成本。
    */
+  /** 读原始配置文件，找出 schema 不认识的键 */
+  private unknownConfigKeys(home: string): string[] {
+    try {
+      const file = join(home, 'data', 'config.json');
+      const raw = readFileSync(file, 'utf8');
+      return findUnknownConfigKeys(JSON.parse(raw));
+    } catch {
+      return [];
+    }
+  }
+
+  /** 管理员命令审计：append-only，不阻塞主流程 */
+  private recordAudit(record: {
+    sceneKey: string;
+    senderId: string;
+    senderName?: string;
+    command: string;
+    detail?: string;
+    ok: boolean;
+    reason?: string;
+  }): void {
+    this.audit
+      .append({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ts: Date.now(), ...record })
+      .catch(() => undefined);
+  }
+
+  /** 给前端/接口读审计记录 */
+  async recentAudits(limit = 100): Promise<AuditRecord[]> {
+    return this.audit.recent({ limit });
+  }
+
   async statusReport(topic?: string): Promise<string> {
     const t = (topic || '').trim().toLowerCase();
     const want = (key: string): boolean => !t || t.includes(key);

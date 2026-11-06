@@ -65,6 +65,8 @@ export interface PipelineDeps {
   stats: Stats;
   logger: Logger;
   emit: (event: PipelineEvent) => void;
+  /** 管理员命令审计（落盘） */
+  audit?: (record: { sceneKey: string; senderId: string; senderName?: string; command: string; detail?: string; ok: boolean; reason?: string }) => void;
   /** 供 #status 命令使用：读本地真实状态，不经过大模型 */
   statusReport?: (topic?: string) => Promise<string>;
   /** 动作执行流水（可选，落盘供前端展示） */
@@ -448,6 +450,7 @@ export class Pipeline {
     if (!/^#status(?:\s|$)/i.test(text)) return false;
     if (!cfg.behavior.admins.includes(msg.senderId)) {
       this.deps.logger.warn('非管理员尝试使用 #status', { sender: msg.senderId });
+      this.deps.audit?.({ sceneKey: msg.sceneKey, senderId: msg.senderId, senderName: msg.senderName, command: 'status-denied', ok: false, reason: '非管理员' });
       return false;
     }
 
@@ -458,6 +461,7 @@ export class Pipeline {
         const report = (await this.deps.statusReport?.(topic)) ?? '(没有可用的状态来源)';
         await napcat.sendText(msg.scene, report.slice(0, 1500));
         emit({ type: 'dev', ts: this.now(), data: { sceneKey: msg.sceneKey, action: `status ${topic}`.trim() } });
+        this.deps.audit?.({ sceneKey: msg.sceneKey, senderId: msg.senderId, senderName: msg.senderName, command: 'status', ok: true, detail: topic || 'all' });
       } catch (err) {
         void napcat.sendText(msg.scene, `状态读取失败：${err instanceof Error ? err.message : String(err)}`).catch(() => undefined);
       }
@@ -495,6 +499,7 @@ export class Pipeline {
 
     if (!cfg.behavior.admins.includes(msg.senderId)) {
       logger.warn('非管理员尝试使用开发模式命令', { sender: msg.senderId, sceneKey });
+      this.deps.audit?.({ sceneKey, senderId: msg.senderId, senderName: msg.senderName, command: 'dev-denied', ok: false, reason: '非管理员' });
       return false;
     }
 
@@ -516,6 +521,7 @@ export class Pipeline {
       const until = Date.now() + ttl;
       this.devModeUntil.set(sceneKey, until);
       logger.info('开发模式开启', { sceneKey, by: msg.senderId, until });
+      this.deps.audit?.({ sceneKey, senderId: msg.senderId, senderName: msg.senderName, command: 'dev-on', ok: true, detail: `${Math.round(ttl / 60000)} 分钟` });
       reply(`开发模式已开（${Math.round(ttl / 60000)} 分钟）\n人格/样本/记忆暂停注入，只保留基础约束与 JSON 协议。到期自动恢复。`);
       return true;
     }
@@ -523,12 +529,14 @@ export class Pipeline {
     if (sub === 'off' || sub === '关') {
       this.devModeUntil.delete(sceneKey);
       logger.info('开发模式关闭', { sceneKey, by: msg.senderId });
+      this.deps.audit?.({ sceneKey, senderId: msg.senderId, senderName: msg.senderName, command: 'dev-off', ok: true });
       reply('开发模式已关，人格恢复。');
       return true;
     }
 
     const on = this.isDevMode(sceneKey);
     const until = this.devModeUntil.get(sceneKey);
+    this.deps.audit?.({ sceneKey, senderId: msg.senderId, senderName: msg.senderName, command: 'dev-status', ok: true, detail: on ? 'on' : 'off' });
     const left = until ? Math.max(0, Math.round((until - Date.now()) / 60000)) : 0;
     reply([
       `开发模式：${on ? `开（剩 ${left} 分钟）` : '关'}`,
@@ -581,6 +589,7 @@ export class Pipeline {
     }
 
     logger.info('单条开发模式问答', { sceneKey: msg.sceneKey, by: msg.senderId, cfgLen: cfg.prompt.inject ? 1 : 0 });
+    this.deps.audit?.({ sceneKey: msg.sceneKey, senderId: msg.senderId, senderName: msg.senderName, command: `dev-${kind}`, ok: true, detail: body.slice(0, 80) });
     await this.runReply({ trigger: probe, reason: 'manual', devModeOnce: true });
   }
 
