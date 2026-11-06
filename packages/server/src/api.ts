@@ -252,11 +252,13 @@ export function createApi(runtime: Runtime): Router {
   // ---------------- 样本 ----------------
   router.get('/api/samples', async (ctx) => {
     const limit = clampInt(ctx.query.get('limit'), 100, 1, 1000);
-    return { json: { items: runtime.stores.samples.list(limit) } };
+    const personaId = ctx.query.get('personaId') ?? undefined;
+    return { json: { items: runtime.stores.samples.list(limit, personaId) } };
   });
 
   router.post('/api/samples', async (ctx) => {
-    const body = (ctx.body ?? {}) as { question?: string; answer?: string; tags?: string[]; source?: string };
+    const body = (ctx.body ?? {}) as {
+      personaId?: string; question?: string; answer?: string; tags?: string[]; source?: string };
     if (!body.question?.trim() || !body.answer?.trim()) {
       return { status: 400, json: { error: 'question 与 answer 都不能为空' } };
     }
@@ -265,6 +267,7 @@ export function createApi(runtime: Runtime): Router {
       answer: body.answer,
       ...(body.tags ? { tags: body.tags } : {}),
       ...(body.source ? { source: body.source } : {}),
+      ...(body.personaId ? { personaId: body.personaId } : {}),
     });
     return { json: { ok: true, sample } };
   });

@@ -12,9 +12,12 @@ export interface Sample {
   createdAt: number;
   /** 来源: manual / import:<file> / extract:<sceneKey> */
   source?: string;
+  /** 归属人格；不填 = 全局样本，所有未绑定的人格都能用 */
+  personaId?: string;
 }
 
 export interface SampleInput {
+  personaId?: string;
   question: string;
   answer: string;
   tags?: string[];
@@ -54,8 +57,16 @@ export class SampleStore {
     return store;
   }
 
-  list(limit = 200): Sample[] {
-    return this.items.slice(-limit).reverse();
+  list(limit = 200, personaId?: string): Sample[] {
+    const scoped = personaId
+      ? this.items.filter((s) => !s.personaId || s.personaId === personaId)
+      : this.items;
+    return scoped.slice(-limit).reverse();
+  }
+
+  /** 某个人的专属样本数（不含全局） */
+  countFor(personaId: string): number {
+    return this.items.filter((s) => s.personaId === personaId).length;
   }
 
   get size(): number {
@@ -70,6 +81,7 @@ export class SampleStore {
       tags: input.tags ?? [],
       createdAt: Date.now(),
       ...(input.source ? { source: input.source } : {}),
+      ...(input.personaId ? { personaId: input.personaId } : {}),
     };
     this.items.push(sample);
     void appendJsonl(this.file, sample);
@@ -93,12 +105,18 @@ export class SampleStore {
    * 按与当前对话的相关度挑选 few-shot。
    * embedding 还没接上, 先用字符 n-gram 相似度 + 时间新鲜度做加权。
    */
-  pick(query: string, limit: number): Sample[] {
-    if (this.items.length === 0 || limit <= 0) return [];
-    if (!query.trim()) return this.list(limit);
+  pick(query: string, limit: number, personaId?: string): Sample[] {
+    // 人格有自己的样本池时只在池里挑；池是空的才回退到全局样本
+    const pool = personaId
+      ? (this.items.some((s) => s.personaId === personaId)
+          ? this.items.filter((s) => !s.personaId || s.personaId === personaId)
+          : this.items)
+      : this.items;
+    if (pool.length === 0 || limit <= 0) return [];
+    if (!query.trim()) return this.list(limit, personaId);
 
     const now = Date.now();
-    const scored = this.items.map((sample) => {
+    const scored = pool.map((sample) => {
       const text = `${sample.question} ${sample.tags.join(' ')}`;
       const rel = similarity(query, text);
       const ageDays = (now - sample.createdAt) / 86_400_000;

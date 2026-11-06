@@ -373,6 +373,25 @@
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid-2 { grid-template-columns: 1fr; }
   }
+  .pgear { font-size: 13px; line-height: 1; padding: 4px 5px; border-radius: 6px; opacity: .45;
+    cursor: pointer; transition: opacity .15s ease, background .15s ease; }
+  .pgear:hover { opacity: 1; background: var(--bg-soft); }
+
+  .drawer-mask { position: fixed; inset: 0; background: rgba(15,15,20,.28); backdrop-filter: blur(2px);
+    opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 60; }
+  .drawer-mask.open { opacity: 1; pointer-events: auto; }
+  .drawer { position: absolute; top: 0; right: 0; height: 100%; width: 420px; max-width: 92vw;
+    background: var(--bg); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+    transform: translateX(18px); transition: transform .18s ease; box-shadow: -18px 0 48px rgba(0,0,0,.12); }
+  .drawer-mask.open .drawer { transform: translateX(0); }
+  .drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+  .drawer-title { font-size: 15px; font-weight: 600; }
+  .drawer-body { flex: 1; overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; }
+  .drawer-sec h4 { margin: 0 0 10px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; }
+  .drawer-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); }
+
   .gchip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--bg-soft); color: var(--muted); border: 1px solid var(--line); }
   .gsec { margin-top: 14px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); opacity: .8; }
   .grel { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; color: var(--text); }
@@ -468,29 +487,20 @@
       <div class="grid-2" style="grid-template-columns: 300px 1fr;">
         <div class="col">
           <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
-            <h3>人格库</h3>
-            <div class="list" id="persona-list" style="flex:1;"></div>
+            <div class="row" style="justify-content:space-between;">
+              <h3 style="margin:0;">人格库</h3>
+              <button class="btn sm ghost" id="btn-persona-settings">⚙ 设置</button>
+            </div>
+            <div class="list" id="persona-list" style="flex:1; margin-top:10px;"></div>
             <div style="display:flex; gap:8px; margin-top:12px;">
               <button class="btn sm" id="btn-persona-new">+ 新建</button>
               <button class="btn sm" id="btn-persona-import">导入 .md</button>
             </div>
           </div>
-
-          <div class="card" style="height:264px; flex:0 0 264px; display:flex; flex-direction:column; gap:8px; overflow:auto;">
-            <h3 style="margin:0;">提纯目标</h3>
-            <div class="field"><label>会话</label><select class="input" id="dis-scene"></select></div>
-            <div class="field"><label>目标用户</label><select class="input" id="dis-user"></select></div>
-            <label class="check"><input type="checkbox" id="dis-auto" /> 攒够新发言后自动提纯</label>
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span class="faint" id="dis-last" style="font-size:11.5px;">未提纯</span>
-              <span class="spacer"></span>
-              <button class="btn sm" id="btn-dis-run">立即提纯</button>
-            </div>
-          </div>
         </div>
         <div class="col">
           <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:10px;">
-            <div style="display:flex; gap:8px; align-items:center;">
+            <div class="row" style="gap:8px;">
               <input class="input" id="persona-name" placeholder="人格名称" style="max-width:200px;" />
               <input class="input" id="persona-desc" placeholder="一句话描述" />
             </div>
@@ -503,15 +513,47 @@
               <button class="btn sm primary" id="btn-persona-activate">设为当前</button>
             </div>
           </div>
-          <div class="card" style="height:264px; flex:0 0 264px; display:flex; flex-direction:column;">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <h3 style="margin:0;">few-shot 样本 <span class="faint" id="sample-count"></span></h3>
-              <span class="spacer"></span>
-              <button class="btn sm" id="btn-sample-add">+ 添加</button>
-            </div>
-            <div class="qalist" id="sample-list" style="flex:1; margin-top:10px;"></div>
-          </div>
         </div>
+      </div>
+
+      <!-- 人格设置抽屉：提纯目标 + 样本池 -->
+      <div class="drawer-mask" id="persona-settings-mask">
+        <aside class="drawer" id="persona-settings">
+          <div class="drawer-head">
+            <div>
+              <div class="drawer-title" id="ps-title">人格设置</div>
+              <div class="faint" style="font-size:12px;">提纯目标与样本池只对这个人格生效</div>
+            </div>
+            <button class="btn sm ghost" id="ps-close">关闭</button>
+          </div>
+          <div class="drawer-body">
+            <div class="drawer-sec">
+              <h4>提纯目标</h4>
+              <div class="field"><label>会话</label><select class="input" id="dis-scene"></select></div>
+              <div class="field"><label>目标用户</label><select class="input" id="dis-user"></select></div>
+              <label class="check"><input type="checkbox" id="dis-auto" /> 攒够新发言后自动提纯</label>
+              <div class="row" style="margin-top:10px; gap:8px;">
+                <span class="faint" id="dis-last" style="font-size:11.5px;">未提纯</span>
+                <span class="spacer"></span>
+                <button class="btn sm" id="btn-dis-run">立即提纯</button>
+              </div>
+            </div>
+            <div class="drawer-sec">
+              <div class="row" style="justify-content:space-between;">
+                <h4 style="margin:0;">样本池 <span class="faint" id="sample-count" style="font-weight:400;"></span></h4>
+                <button class="btn sm ghost" id="btn-sample-add">+ 添加</button>
+              </div>
+              <div class="faint" style="font-size:12px; margin:8px 0;">这个人格专属的 few-shot。未绑定人格的全局样本也会参与挑选。</div>
+              <div class="qalist" id="sample-list" style="max-height:300px; overflow:auto;"></div>
+            </div>
+          </div>
+          <div class="drawer-foot">
+            <span class="faint" style="font-size:11.5px;">保存后立即生效</span>
+            <span class="spacer"></span>
+            <button class="btn sm ghost" id="ps-cancel">取消</button>
+            <button class="btn sm primary" id="ps-save">保存设置</button>
+          </div>
+        </aside>
       </div>
     </section>
 
@@ -1555,11 +1597,17 @@ function renderPersonas() {
     ? personaList.map((p) =>
         '<div class="list-item ' + (p.id === editingId ? 'active' : '') + '" data-id="' + esc(p.id) + '">' +
           '<div class="row"><span class="nm">' + esc(p.name) + '</span>' +
-          (p.id === personaActive ? '<span class="tag accent">当前</span>' : '') + '</div>' +
+          (p.id === personaActive ? '<span class="tag accent">当前</span>' : '') +
+          '<span class="spacer"></span><span class="pgear" data-gear="' + esc(p.id) + '" title="设置">⚙</span></div>' +
           '<div class="last">' + p.content.length + ' 字 · ' + esc(p.description || '') + '</div>' +
         '</div>').join('')
     : '<div class="faint" style="padding:10px">还没有人格</div>';
-  $$('#persona-list .list-item').forEach((n) => { n.onclick = () => selectPersona(n.dataset.id); });
+  $$('#persona-list .list-item').forEach((n) => {
+    n.onclick = () => selectPersona(n.dataset.id);
+  });
+  $$('#persona-list [data-gear]').forEach((g) => {
+    g.onclick = (ev) => { ev.stopPropagation(); void openPersonaSettings(g.dataset.gear); };
+  });
 }
 
 function selectPersona(id) {
@@ -1646,9 +1694,74 @@ $('#btn-sample-add').onclick = async () => {
   const q = prompt('对方会说什么？（问题）'); if (!q) return;
   const a = prompt('机器人该怎么回？（答案）'); if (!a) return;
   try {
-    await api('/api/samples', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: q, answer: a, source: 'manual' }) });
-    toast('已添加'); loadSamples();
+    await api('/api/samples', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: q, answer: a, source: 'manual', ...(settingsPersonaId ? { personaId: settingsPersonaId } : {}) }),
+    });
+    toast('已添加'); loadSamples(settingsPersonaId);
   } catch (e) { toast('添加失败：' + e.message); }
+};
+
+/* ================= 人格设置抽屉 ================= */
+let settingsPersonaId = null;
+
+async function openPersonaSettings(id) {
+  const persona = personaList.find((x) => x.id === id);
+  if (!persona) { toast('先选一个人格'); return; }
+  settingsPersonaId = id;
+  if (editingId !== id) selectPersona(id);
+
+  $('#ps-title').textContent = '「' + persona.name + '」的设置';
+  $('#persona-settings-mask').classList.add('open');
+  await renderDistill(persona);
+  await loadSamples(id);
+}
+
+function closePersonaSettings() {
+  $('#persona-settings-mask').classList.remove('open');
+  settingsPersonaId = null;
+}
+
+async function savePersonaSettings() {
+  if (!settingsPersonaId) return;
+  const persona = personaList.find((x) => x.id === settingsPersonaId);
+  if (!persona) return;
+  const senderId = $('#dis-user').value;
+  try {
+    await api('/api/personas', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: persona.id,
+        name: persona.name,
+        description: persona.description || '',
+        content: persona.content,
+        distill: senderId
+          ? {
+              ...($('#dis-scene').value ? { sceneKey: $('#dis-scene').value } : {}),
+              senderId,
+              senderName: ($('#dis-user').selectedOptions[0] || {}).textContent || '',
+              auto: $('#dis-auto').checked,
+            }
+          : null,
+      }),
+    });
+    toast('设置已保存');
+    await loadPersonas();
+    closePersonaSettings();
+  } catch (e) {
+    toast('保存失败：' + e.message);
+  }
+}
+
+$('#btn-persona-settings').onclick = () => {
+  if (!editingId) { toast('先选一个人格'); return; }
+  void openPersonaSettings(editingId);
+};
+$('#ps-close').onclick = closePersonaSettings;
+$('#ps-cancel').onclick = closePersonaSettings;
+$('#ps-save').onclick = () => void savePersonaSettings();
+$('#persona-settings-mask').onclick = (ev) => {
+  if (ev.target === $('#persona-settings-mask')) closePersonaSettings();
 };
 
 /* ================= 人格 · 提纯目标 ================= */
@@ -1713,15 +1826,19 @@ $('#btn-dis-run').onclick = async () => {
   }
 };
 
-async function loadSamples() {
+async function loadSamples(personaId) {
+  const pid = personaId === undefined ? settingsPersonaId : personaId;
   try {
-    const items = (await api('/api/samples')).items || [];
-    $('#sample-count').textContent = items.length ? items.length + ' 条' : '';
+    const qs = pid ? '?personaId=' + encodeURIComponent(pid) : '';
+    const items = (await api('/api/samples' + qs)).items || [];
+    const mine = pid ? items.filter((s) => s.personaId === pid).length : items.length;
+    $('#sample-count').textContent = pid ? (mine ? mine + ' 条专属' : '暂无专属样本') : (items.length ? items.length + ' 条' : '');
     $('#sample-list').innerHTML = items.length
       ? items.map((s) =>
           '<div class="qa" data-id="' + esc(s.id) + '"><div class="q">Q: ' + esc(s.question) + '</div>' +
           '<div class="a">A: ' + esc(s.answer) + '</div>' +
           '<div class="kv"><span class="faint mono">' + esc(s.source || '') + '</span>' +
+          (!s.personaId ? '<span class="tag">全局</span>' : '') +
           '<span class="spacer"></span><button class="btn sm" data-del="' + esc(s.id) + '">删除</button></div></div>').join('')
       : '<div class="faint">还没有样本。可以在「提纯」页从聊天记录生成，或点右上角添加。</div>';
     $$('#sample-list [data-del]').forEach((b) => {
