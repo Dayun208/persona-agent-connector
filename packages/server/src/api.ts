@@ -608,6 +608,8 @@ export function createApi(runtime: Runtime): Router {
       limit?: number;
       tags?: string[];
       pairIds?: string[];
+      /** 归属人格；不填则写进全局样本池 */
+      personaId?: string;
     };
     if (!body.senderId) return { status: 400, json: { error: '需要 senderId' } };
 
@@ -627,6 +629,7 @@ export function createApi(runtime: Runtime): Router {
         answer: p.answer,
         tags: body.tags ?? ['auto-extract'],
         source: `extract:${p.sceneKey}`,
+        ...(body.personaId ? { personaId: body.personaId } : {}),
       }),
     );
     return { json: { ok: true, imported: added.length, total: store.size } };

@@ -373,6 +373,19 @@
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid-2 { grid-template-columns: 1fr; }
   }
+  .modal-mask { position: fixed; inset: 0; background: rgba(15,15,20,.32); backdrop-filter: blur(2px);
+    display: none; align-items: center; justify-content: center; z-index: 70; }
+  .modal-mask.open { display: flex; }
+  .modal { width: 380px; max-width: 92vw; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px; box-shadow: 0 24px 64px rgba(0,0,0,.18); }
+  .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .pick-item { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-radius: 9px;
+    cursor: pointer; border: 1px solid transparent; }
+  .pick-item:hover { background: var(--bg-soft); }
+  .pick-item.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .pick-item .dot2 { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); opacity: 0; }
+  .pick-item.on .dot2 { opacity: 1; }
+
   .pgear { font-size: 13px; line-height: 1; padding: 4px 5px; border-radius: 6px; opacity: .45;
     cursor: pointer; transition: opacity .15s ease, background .15s ease; }
   .pgear:hover { opacity: 1; background: var(--bg-soft); }
@@ -1702,6 +1715,47 @@ $('#btn-sample-add').onclick = async () => {
   } catch (e) { toast('添加失败：' + e.message); }
 };
 
+/* ================= 通用选择弹窗 ================= */
+let pickResolve = null;
+
+/**
+ * 弹出单选列表，返回被选中的 value（取消返回 null）。
+ * opts: { title, hint, items: [{value,label,desc}], emptyLabel }
+ */
+function pickOne(opts) {
+  return new Promise((resolve) => {
+    pickResolve = resolve;
+    $('#pick-title').textContent = opts.title || '选择';
+    $('#pick-hint').textContent = opts.hint || '';
+    const body = $('#pick-body');
+    body.innerHTML = '';
+    let current = opts.selected ?? null;
+
+    const render = () => {
+      body.innerHTML = opts.items.map((it) =>
+        '<div class="pick-item ' + (it.value === current ? 'on' : '') + '" data-v="' + esc(it.value) + '">' +
+          '<span class="dot2"></span>' +
+          '<div style="min-width:0;"><div>' + esc(it.label) + '</div>' +
+          (it.desc ? '<div class="faint" style="font-size:11.5px;">' + esc(it.desc) + '</div>' : '') +
+          '</div></div>').join('') || '<div class="faint">没有可选项</div>';
+      $$('#pick-body .pick-item').forEach((n) => {
+        n.onclick = () => { current = n.dataset.v; render(); };
+      });
+    };
+    render();
+    $('#pick-modal').classList.add('open');
+
+    const done = (val) => {
+      $('#pick-modal').classList.remove('open');
+      const r = pickResolve; pickResolve = null;
+      if (r) r(val);
+    };
+    $('#pick-ok').onclick = () => done(current);
+    $('#pick-cancel').onclick = () => done(null);
+    $('#pick-modal').onclick = (ev) => { if (ev.target === $('#pick-modal')) done(null); };
+  });
+}
+
 /* ================= 人格设置抽屉 ================= */
 let settingsPersonaId = null;
 
@@ -2044,13 +2098,41 @@ $('#btn-ex-import').onclick = async () => {
   if (!senderId) return;
   const ids = [...exSelected];
   if (exPairs.length && ids.length === 0) { toast('没有勾选任何配对'); return; }
+
+  // 先问归给谁：人格专属池 or 全局池
+  let personas = [];
+  let activeId = null;
+  try {
+    const d = await api('/api/personas');
+    personas = d.items || [];
+    // 这个页面没加载过人格列表，不能依赖全局 personaActive，直接读接口返回
+    activeId = d.activeId || (personas[0] || {}).id || null;
+  } catch (e) { personas = []; }
+  const isActive = (id) => id === activeId;
+  const choice = await pickOne({
+    title: '这些样本归给谁？',
+    hint: '归到某个人格后，只有该人格会用到；选「全局」则所有人格共享',
+    selected: activeId ? 'persona:' + activeId : 'global',
+    items: [
+      ...personas.map((p) => ({
+        value: 'persona:' + p.id,
+        label: p.name + (isActive(p.id) ? '（当前）' : ''),
+        desc: isActive(p.id) ? '正在使用的人格' : '',
+      })),
+      { value: 'global', label: '不绑定人格（全局样本）', desc: '所有人格都能挑到' },
+    ],
+  });
+  if (!choice) return;
+  const personaId = choice === 'global' ? '' : choice.replace('persona:', '');
+
   try {
     const r = await api('/api/extract/import', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ senderId, sceneKey, limit: Number($('#ex-limit').value) || 20, ...(ids.length ? { pairIds: ids } : {}) }),
+      body: JSON.stringify({ senderId, sceneKey, limit: Number($('#ex-limit').value) || 20, ...(ids.length ? { pairIds: ids } : {}), ...(personaId ? { personaId } : {}) }),
     });
-    toast('已导入 ' + (r.count ?? r.imported ?? 0) + ' 条样本');
+    const who = personaId ? ((personas.find((p) => p.id === personaId) || {}).name || '该人格') : '全局';
+    toast('已导入 ' + (r.count ?? r.imported ?? 0) + ' 条样本 → ' + who);
     loadSamples();
   } catch (e) { toast('导入失败：' + e.message); }
 };
@@ -2263,5 +2345,17 @@ setInterval(pollHealth, 5000);
 setInterval(pollStats, 5000);
 setInterval(() => { if ($('#view-overview').classList.contains('active')) loadScenes(); }, 15000);
 </script>
+  <!-- 通用小弹窗：选人格等一次性选择 -->
+  <div class="modal-mask" id="pick-modal">
+    <div class="modal">
+      <div class="modal-title" id="pick-title">选择人格</div>
+      <div class="faint" style="font-size:12px; margin-bottom:12px;" id="pick-hint">导入的样本会归到这个人格下</div>
+      <div id="pick-body"></div>
+      <div class="row" style="margin-top:16px; justify-content:flex-end; gap:8px;">
+        <button class="btn sm ghost" id="pick-cancel">取消</button>
+        <button class="btn sm primary" id="pick-ok">确定</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
