@@ -1715,6 +1715,27 @@ $('#btn-sample-add').onclick = async () => {
   } catch (e) { toast('添加失败：' + e.message); }
 };
 
+/* ================= 通用确认弹窗 ================= */
+function confirmDialog(opts) {
+  return new Promise((resolve) => {
+    $('#confirm-title').textContent = opts.title || '确认';
+    $('#confirm-text').innerHTML = opts.html || esc(opts.text || '');
+    $('#confirm-ok').textContent = opts.okText || '确定';
+    $('#confirm-cancel').textContent = opts.cancelText || '取消';
+    $('#confirm-modal').classList.add('open');
+
+    const done = (val) => {
+      $('#confirm-modal').classList.remove('open');
+      $('#confirm-ok').onclick = null;
+      $('#confirm-cancel').onclick = null;
+      resolve(val);
+    };
+    $('#confirm-ok').onclick = () => done(true);
+    $('#confirm-cancel').onclick = () => done(false);
+    $('#confirm-modal').onclick = (ev) => { if (ev.target === $('#confirm-modal')) done(false); };
+  });
+}
+
 /* ================= 通用选择弹窗 ================= */
 let pickResolve = null;
 
@@ -2099,7 +2120,32 @@ $('#btn-ex-import').onclick = async () => {
   const ids = [...exSelected];
   if (exPairs.length && ids.length === 0) { toast('没有勾选任何配对'); return; }
 
-  // 先问归给谁：人格专属池 or 全局池
+  // 没跑过 AI 筛选的样本质量普遍很差（"没事"、"[动画表情]" 这种），先劝一句
+  const picked = ids.length ? exPairs.filter((p) => ids.includes(p.id)) : exPairs;
+  const scored = picked.filter((p) => p.aiScore !== undefined).length;
+  if (picked.length > 0 && scored === 0) {
+    const ok = await confirmDialog({
+      title: '这批样本没有经过 AI 筛选',
+      html: '规则配对只看结构，容易把「没事」「[动画表情]」这类没营养的回复也导进来。<br><br>'
+        + '建议先点上面的「<b>AI 筛选</b>」，它会给每条打分并去掉重复提问。<br><br>仍然导入吗？',
+      okText: '仍然导入',
+      cancelText: '回去筛选',
+    });
+    if (!ok) {
+      $('#btn-ex-ai').focus();
+      return;
+    }
+  } else if (picked.length > 0 && scored < picked.length) {
+    const ok = await confirmDialog({
+      title: '部分样本没有 AI 评分',
+      html: `选中的 ${picked.length} 条里有 <b>${picked.length - scored}</b> 条没打过分，可能是筛选后又勾回来的。<br><br>继续导入吗？`,
+      okText: '继续导入',
+      cancelText: '取消',
+    });
+    if (!ok) return;
+  }
+
+  // 再问归给谁：人格专属池 or 全局池
   let personas = [];
   let activeId = null;
   try {
@@ -2345,6 +2391,18 @@ setInterval(pollHealth, 5000);
 setInterval(pollStats, 5000);
 setInterval(() => { if ($('#view-overview').classList.contains('active')) loadScenes(); }, 15000);
 </script>
+  <!-- 通用确认弹窗 -->
+  <div class="modal-mask" id="confirm-modal">
+    <div class="modal" style="width:420px;">
+      <div class="modal-title" id="confirm-title">确认</div>
+      <div id="confirm-text" style="font-size:13px; line-height:1.65; color:var(--muted); margin:8px 0 4px;"></div>
+      <div class="row" style="margin-top:18px; justify-content:flex-end; gap:8px;">
+        <button class="btn sm ghost" id="confirm-cancel">取消</button>
+        <button class="btn sm primary" id="confirm-ok">确定</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 通用小弹窗：选人格等一次性选择 -->
   <div class="modal-mask" id="pick-modal">
     <div class="modal">
