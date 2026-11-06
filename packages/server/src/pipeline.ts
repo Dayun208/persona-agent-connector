@@ -75,6 +75,8 @@ interface ReplyContext {
   reason: TriggerReason;
   matchedKeyword?: string;
   decision?: JudgeDecision;
+  /** 单条消息强制走开发模式（不改会话状态） */
+  devModeOnce?: boolean;
 }
 
 /** 最近发送的机器人消息, 供 recall 使用 */
@@ -339,7 +341,7 @@ export class Pipeline {
         members: this.recentMembers(sceneKey, trigger),
         webSearch: cfg.openclaw.webSearch,
         vision: cfg.vision.enabled,
-        devMode: this.isDevMode(sceneKey),
+        devMode: ctx.devModeOnce ?? this.isDevMode(sceneKey),
         ...(ctx.matchedKeyword ? { matchedKeyword: ctx.matchedKeyword } : {}),
         secondsSinceLastReply: this.secondsSinceLastReply(sceneKey),
       });
@@ -456,6 +458,15 @@ export class Pipeline {
       emit({ type: 'dev', ts: this.now(), data: { sceneKey, action: sub || 'status' } });
     };
 
+    // ---- 单条消息命令：只对当前这条生效，不影响会话状态 ----
+    const once = /^(ask|q|judge|prompt)\s+([\s\S]+)$/i.exec(text.slice(prefix.length).trim());
+    if (once) {
+      const kind = once[1]!.toLowerCase();
+      const body = once[2]!.trim();
+      void this.runOnceCommand(msg, cfg, kind, body);
+      return true;
+    }
+
     if (sub === 'on' || sub === '开') {
       const until = Date.now() + ttl;
       this.devModeUntil.set(sceneKey, until);
@@ -480,9 +491,52 @@ export class Pipeline {
       `判断：阈值 ${cfg.judgeModel.replyThreshold} / 每 ${cfg.judgeModel.judgeEveryN} 条 / 冷却 ${Math.round(cfg.judgeModel.replyCooldownMs / 1000)}s`,
       `注入：人格${cfg.prompt.inject.persona ? '✓' : '✗'} 样本${cfg.prompt.inject.samples ? '✓' : '✗'} 记忆${cfg.prompt.inject.memory ? '✓' : '✗'} 历史${cfg.prompt.inject.history ? '✓' : '✗'}`,
       `联网：${cfg.openclaw.webSearch ? '开' : '关'}　识图：${cfg.vision.enabled ? cfg.vision.mode : '关'}`,
-      `用法：${prefix} on / ${prefix} off`,
+      `用法：${prefix} on|off ｜ ${prefix} ask <文本> ｜ ${prefix} judge <文本> ｜ ${prefix} prompt <文本>`,
     ].join('\n'));
     return true;
+  }
+
+  /**
+   * 单条消息命令：只对这条生效，不改变会话的开发模式状态。
+   *   #dev ask <文本>     跳过人格直接回答这条
+   *   #dev judge <文本>   只跑判断模型，返回决策
+   *   #dev prompt <文本>  构建 Prompt 并返回摘要（段落/字数/开头）
+   */
+  private async runOnceCommand(msg: ChatMessage, cfg: PascConfig, kind: string, body: string): Promise<void> {
+    const { napcat, logger, emit } = this.deps;
+    const say = (text: string): void => {
+      void napcat.sendText(msg.scene, text.slice(0, 1500)).catch(() => undefined);
+      emit({ type: 'dev', ts: this.now(), data: { sceneKey: msg.sceneKey, action: kind } });
+    };
+
+    const probe: ChatMessage = { ...msg, id: `${msg.id}-dev`, text: body, mentionsSelf: false, segments: [] };
+
+    if (kind === 'judge') {
+      try {
+        const d = await this.judgeOnly(probe);
+        say(`判断：${d.shouldReply ? '回复' : '沉默'}（置信 ${d.confidence}）\n理由：${d.reason || '—'}`);
+      } catch (err) {
+        say(`判断失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    if (kind === 'prompt') {
+      try {
+        const bundle = await this.previewPrompt(probe, 'manual');
+        say([
+          `段落：${bundle.sections.join(' → ')}`,
+          `字数：${bundle.chars}（约 ${bundle.estimatedTokens} tok）`,
+          `开头：${bundle.system.slice(0, 260).replace(/\n+/g, ' ')}…`,
+        ].join('\n'));
+      } catch (err) {
+        say(`构建失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    logger.info('单条开发模式问答', { sceneKey: msg.sceneKey, by: msg.senderId, cfgLen: cfg.prompt.inject ? 1 : 0 });
+    await this.runReply({ trigger: probe, reason: 'manual', devModeOnce: true });
   }
 
   /**
