@@ -1161,13 +1161,15 @@ async function renderGraphDetail(nodeId) {
   const byId = new Map(graphState.nodes.map((n) => [n.id, n]));
   const edges = graphState.edges.filter((e) => e.from === nodeId || e.to === nodeId);
   const memories = await loadMemoryTexts();
+  const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) : '—');
 
   const relHtml = edges.length
     ? edges.map((e) => {
         const otherId = e.from === nodeId ? e.to : e.from;
         const other = byId.get(otherId);
         const arrow = e.from === nodeId ? '→' : '←';
-        return `<div class="grel">${arrow}<b>${gEsc(e.relation)}</b>${gEsc(other ? other.name : otherId)}</div>`;
+        const when = e.lastSeen ? `<span class="faint" style="font-size:11px; margin-left:auto;">${fmtDate(e.lastSeen)}</span>` : '';
+        return `<div class="grel">${arrow}<b>${gEsc(e.relation)}</b>${gEsc(other ? other.name : otherId)}${when}</div>`;
       }).join('')
     : '<div class="grel" style="color:var(--muted)">暂无关联关系</div>';
 
@@ -1178,17 +1180,60 @@ async function renderGraphDetail(nodeId) {
     .map((m) => `<div class="gmem">${gEsc(m.text)}</div>`)
     .join('') || '<div class="grel" style="color:var(--muted)">暂无关联记忆</div>';
 
+  const timeLine = node.lastSeen
+    ? `首次 ${fmtDate(node.firstSeen)} · 最近 ${fmtDate(node.lastSeen)}`
+    : '时间未知（旧图数据）';
+
   box.style.color = 'var(--text)';
   box.innerHTML = `
-    <div style="font-size:16px; font-weight:600;">${gEsc(node.name)}</div>
+    <div style="display:flex; align-items:baseline; gap:8px;">
+      <div style="font-size:16px; font-weight:600;">${gEsc(node.name)}</div>
+      <span class="spacer"></span>
+      <button class="btn sm ghost" id="btn-graph-merge">合并到…</button>
+    </div>
     <div style="margin-top:2px; color:var(--muted); font-size:12px;">
-      ${TYPE_LABEL[node.type] || '实体'} · 提及 ${node.mentions} 次
+      ${TYPE_LABEL[node.type] || '实体'} · 提及 ${node.mentions} 次 · ${timeLine}
     </div>
     <div class="gsec">关系 ${edges.length}</div>
     ${relHtml}
     <div class="gsec">相关记忆 ${memIds.length}</div>
     ${memHtml}
   `;
+
+  const mergeBtn = $('#btn-graph-merge');
+  if (mergeBtn) mergeBtn.onclick = () => void mergeGraphNode(node);
+}
+
+/** 把当前节点合并到另一个节点 */
+async function mergeGraphNode(node) {
+  const others = graphState.nodes.filter((n) => n.id !== node.id);
+  if (others.length === 0) { toast('没有可合并的目标'); return; }
+
+  const target = await pickOne({
+    title: `把「${node.name}」合并到…`,
+    hint: '合并后「' + node.name + '」会成为别名，以后抽到这个说法会自动归到目标节点',
+    items: others.map((n) => ({
+      value: n.id,
+      label: n.name,
+      desc: (TYPE_LABEL[n.type] || '实体') + ' · 提及 ' + n.mentions + ' 次',
+    })),
+  });
+  if (!target) return;
+
+  try {
+    const r = await api('/api/graph/merge', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ from: node.id, to: target }),
+    });
+    if (!r.ok) { toast('合并失败：节点不存在'); return; }
+    toast('已合并，现在共 ' + r.nodes + ' 个实体');
+    graphState.selected = r.merged || target;
+    await loadGraph();
+    await renderGraphDetail(graphState.selected);
+  } catch (e) {
+    toast('合并失败：' + e.message);
+  }
 }
 
 function bindGraph() {

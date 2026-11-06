@@ -104,3 +104,63 @@ describe('isGenericName', () => {
     expect(isGenericName('张三')).toBe(false);
   });
 });
+
+describe('合并与时间', () => {
+  it('合并节点：权重并入、边改指向、记下别名', async () => {
+    const { graph } = makeGraph();
+    const g = await graph;
+    g.merge([{ name: '张三', type: 'person' }, { name: '小张', type: 'person' }, { name: '杭州', type: 'place' }],
+      [{ from: '小张', to: '杭州', relation: '住在' }], 'm1', undefined, 1000);
+    g.merge([{ name: '张三', type: 'person' }], [], 'm2', undefined, 2000);
+
+    const merged = g.mergeNodes('小张', '张三');
+    expect(merged).toBe('张三');
+    const snap = g.snapshot();
+    expect(snap.nodes.map((n) => n.name).sort()).toEqual(['张三', '杭州']);
+    expect(snap.nodes.find((n) => n.name === '张三')!.mentions).toBe(3);
+    expect(snap.edges[0]!.from).toBe('张三');
+    expect(snap.edges[0]!.to).toBe('杭州');
+  });
+
+  it('合并后旧名字再出现会自动归到正名', async () => {
+    const { graph } = makeGraph();
+    const g = await graph;
+    g.merge([{ name: '张三', type: 'person' }, { name: '小张', type: 'person' }], [], 'm1');
+    g.mergeNodes('小张', '张三');
+    g.merge([{ name: '小张', type: 'person' }], [], 'm2');
+    const snap = g.snapshot();
+    expect(snap.nodes).toHaveLength(1);
+    expect(snap.nodes[0]!.name).toBe('张三');
+    expect(snap.nodes[0]!.mentions).toBe(3);
+  });
+
+  it('时间戳：首次取更早、最近取更晚', async () => {
+    const { graph } = makeGraph();
+    const g = await graph;
+    g.merge([{ name: '张三', type: 'person' }], [], 'm1', undefined, 5000);
+    g.merge([{ name: '张三', type: 'person' }], [], 'm2', undefined, 1000);
+    const node = g.snapshot().nodes[0]!;
+    expect(node.firstSeen).toBe(1000);
+    expect(node.lastSeen).toBe(5000);
+  });
+
+  it('合并不存在的节点返回 undefined', async () => {
+    const { graph } = makeGraph();
+    const g = await graph;
+    g.merge([{ name: '张三', type: 'person' }], [], 'm1');
+    expect(g.mergeNodes('不存在', '张三')).toBeUndefined();
+    expect(g.mergeNodes('张三', '张三')).toBeUndefined();
+  });
+
+  it('别名可跨层级解析', async () => {
+    const { graph } = makeGraph();
+    const g = await graph;
+    g.merge([{ name: 'A', type: 'person' }, { name: 'B', type: 'person' }, { name: 'C', type: 'person' }], [], 'm1');
+    g.mergeNodes('A', 'B');
+    g.mergeNodes('B', 'C');
+    g.merge([{ name: 'A', type: 'person' }], [], 'm2');
+    const names = g.snapshot().nodes.map((n) => n.name);
+    expect(names).toContain('C');
+    expect(names).not.toContain('A');
+  });
+});

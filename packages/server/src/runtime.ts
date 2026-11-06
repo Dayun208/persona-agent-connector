@@ -1037,6 +1037,15 @@ export class Runtime {
     return this.graph.about(nodeId);
   }
 
+  /** 合并两个实体（小张 → 张三），并记住别名 */
+  async mergeGraphNodes(fromId: string, toId: string): Promise<{ ok: boolean; merged?: string; nodes: number; edges: number }> {
+    const merged = this.graph.mergeNodes(fromId, toId);
+    if (!merged) return { ok: false, nodes: this.graph.nodeCount, edges: this.graph.edgeCount };
+    await this.graph.save();
+    this.logger.info('图谱实体合并', { from: fromId, to: merged, nodes: this.graph.nodeCount });
+    return { ok: true, merged, nodes: this.graph.nodeCount, edges: this.graph.edgeCount };
+  }
+
   /** 全量重建：把现有记忆重新过一遍 */
   async rebuildGraph(): Promise<{ nodes: number; edges: number; batches: number }> {
     const client = this.extractClient();

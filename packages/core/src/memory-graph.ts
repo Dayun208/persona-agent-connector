@@ -28,6 +28,9 @@ export interface GraphNode {
   mentions: number;
   /** 支撑它的记忆 id */
   memoryIds: string[];
+  /** 第一次/最近一次被提到的时间 */
+  firstSeen: number;
+  lastSeen: number;
 }
 
 export interface GraphEdge {
@@ -39,6 +42,8 @@ export interface GraphEdge {
   /** 证据条数 */
   weight: number;
   memoryIds: string[];
+  firstSeen: number;
+  lastSeen: number;
 }
 
 export interface GraphSnapshot {
@@ -48,10 +53,12 @@ export interface GraphSnapshot {
 }
 
 interface GraphFile {
-  version: 1;
+  version: 2;
   updatedAt: number;
   nodes: Record<string, GraphNode>;
   edges: Record<string, GraphEdge>;
+  /** 别名 → 正名。"小张" 合并进 "张三" 后，以后再抽到"小张"会自动归到"张三" */
+  aliases: Record<string, string>;
 }
 
 const ENTITY_TYPES: EntityType[] = ['person', 'place', 'org', 'topic'];
@@ -79,7 +86,7 @@ function edgeId(from: string, relation: string, to: string): string {
 }
 
 export class MemoryGraph {
-  private data: GraphFile = { version: 1, updatedAt: 0, nodes: {}, edges: {} };
+  private data: GraphFile = { version: 2, updatedAt: 0, nodes: {}, edges: {}, aliases: {} };
 
   private constructor(private readonly file: string) {}
 
@@ -87,13 +94,45 @@ export class MemoryGraph {
     const graph = new MemoryGraph(file);
     try {
       const raw = await readFile(file, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<GraphFile>;
-      if (parsed && parsed.version === 1) {
+      const parsed = JSON.parse(raw) as { version?: number; updatedAt?: number; nodes?: Record<string, GraphNode>; edges?: Record<string, GraphEdge>; aliases?: Record<string, string> };
+      if (parsed && (parsed.version === 1 || parsed.version === 2)) {
+        const nodes: Record<string, GraphNode> = {};
+        for (const [id, raw] of Object.entries(parsed.nodes ?? {})) {
+          // v1 没有时间字段，用 0 表示"时间未知"
+          const node = raw as Partial<GraphNode>;
+          nodes[id] = {
+            id: node.id ?? id,
+            name: node.name ?? id,
+            type: node.type ?? 'topic',
+            mentions: node.mentions ?? 1,
+            memoryIds: node.memoryIds ?? [],
+            firstSeen: node.firstSeen ?? 0,
+            lastSeen: node.lastSeen ?? 0,
+          };
+        }
+        const edges: Record<string, GraphEdge> = {};
+        for (const [id, raw] of Object.entries(parsed.edges ?? {})) {
+          const edge = raw as Partial<GraphEdge>;
+          edges[id] = {
+            id: edge.id ?? id,
+            from: edge.from ?? '',
+            to: edge.to ?? '',
+            relation: edge.relation ?? '',
+            weight: edge.weight ?? 1,
+            memoryIds: edge.memoryIds ?? [],
+            firstSeen: edge.firstSeen ?? 0,
+            lastSeen: edge.lastSeen ?? 0,
+          };
+        }
+        for (const [id, e] of Object.entries(edges)) {
+          if (!e.from || !e.to) delete edges[id];
+        }
         graph.data = {
-          version: 1,
+          version: 2,
           updatedAt: parsed.updatedAt ?? 0,
-          nodes: parsed.nodes ?? {},
-          edges: parsed.edges ?? {},
+          nodes,
+          edges,
+          aliases: parsed.aliases ?? {},
         };
       }
     } catch {
@@ -119,6 +158,7 @@ export class MemoryGraph {
     relations: Array<{ from: string; to: string; relation: string }>,
     memoryId: string,
     rename?: (name: string) => string,
+    now: number = Date.now(),
   ): void {
     for (const entity of entities) {
       const raw = entity.name?.trim();
@@ -127,22 +167,26 @@ export class MemoryGraph {
       // 把 QQ 号换成昵称：记忆里常写"2959515696"，图上显示成号码没法看
       const name = rename ? rename(raw) : raw;
       if (!name || isGenericName(name)) continue;
-      const id = normalizeName(name);
+      // 之前合并过的别名，直接归到正名
+      const id = this.resolveAlias(normalizeName(name));
       const existing = this.data.nodes[id];
       const type = ENTITY_TYPES.includes(entity.type as EntityType) ? (entity.type as EntityType) : 'topic';
       if (existing) {
         existing.mentions += 1;
+        // 记忆不一定按时间顺序处理，首末时间都要取极值
+        if (existing.firstSeen === 0 || now < existing.firstSeen) existing.firstSeen = now;
+        existing.lastSeen = Math.max(existing.lastSeen, now);
         if (!existing.memoryIds.includes(memoryId)) existing.memoryIds.push(memoryId);
         // 人 > 地点/组织 > 话题：先认出来的更强类型保留下来
         if (existing.type === 'topic' && type !== 'topic') existing.type = type;
       } else {
-        this.data.nodes[id] = { id, name, type, mentions: 1, memoryIds: [memoryId] };
+        this.data.nodes[id] = { id, name, type, mentions: 1, memoryIds: [memoryId], firstSeen: now, lastSeen: now };
       }
     }
 
     for (const rel of relations) {
-      const from = normalizeName(rel.from ?? '');
-      const to = normalizeName(rel.to ?? '');
+      const from = this.resolveAlias(normalizeName(rel.from ?? ''));
+      const to = this.resolveAlias(normalizeName(rel.to ?? ''));
       const relation = (rel.relation ?? '').trim();
       if (!from || !to || !relation || from === to) continue;
       // 关系两端的实体必须已知，否则图会断成孤岛
@@ -152,11 +196,77 @@ export class MemoryGraph {
       const existing = this.data.edges[id];
       if (existing) {
         existing.weight += 1;
+        if (existing.firstSeen === 0 || now < existing.firstSeen) existing.firstSeen = now;
+        existing.lastSeen = Math.max(existing.lastSeen, now);
         if (!existing.memoryIds.includes(memoryId)) existing.memoryIds.push(memoryId);
       } else {
-        this.data.edges[id] = { id, from, to, relation, weight: 1, memoryIds: [memoryId] };
+        this.data.edges[id] = { id, from, to, relation, weight: 1, memoryIds: [memoryId], firstSeen: now, lastSeen: now };
       }
     }
+  }
+
+  /** 别名链解析（A→B→C 也能一路追到 C） */
+  private resolveAlias(id: string): string {
+    let cur = id;
+    for (let i = 0; i < 8; i += 1) {
+      const next = this.data.aliases[cur];
+      if (!next || next === cur) break;
+      cur = next;
+    }
+    return cur;
+  }
+
+  /**
+   * 把 fromId 合并进 toId。
+   * 名称/提及次数/记忆证据并入，边改指向，并记下别名 —— 以后抽到旧名字会自动归到新名字。
+   * 返回合并后的节点 id；两端有一个不存在时返回 undefined。
+   */
+  mergeNodes(fromId: string, toId: string): string | undefined {
+    const from = normalizeName(fromId);
+    const to = normalizeName(toId);
+    if (!from || !to || from === to) return undefined;
+    const src = this.data.nodes[from];
+    const dst = this.data.nodes[to];
+    if (!src || !dst) return undefined;
+
+    dst.mentions += src.mentions;
+    dst.firstSeen = dst.firstSeen === 0 ? src.firstSeen : (src.firstSeen === 0 ? dst.firstSeen : Math.min(dst.firstSeen, src.firstSeen));
+    dst.lastSeen = Math.max(dst.lastSeen, src.lastSeen);
+    for (const id of src.memoryIds) {
+      if (!dst.memoryIds.includes(id)) dst.memoryIds.push(id);
+    }
+    if (dst.type === 'topic' && src.type !== 'topic') dst.type = src.type;
+
+    // 边：改指向后可能和已有边重名，重名的合并权重
+    const rebuilt: Record<string, GraphEdge> = {};
+    for (const edge of Object.values(this.data.edges)) {
+      if (edge.from === from && edge.to === from) continue;
+      const nextFrom = edge.from === from ? to : edge.from;
+      const nextTo = edge.to === from ? to : edge.to;
+      if (nextFrom === nextTo) continue;
+      const id = edgeId(nextFrom, edge.relation, nextTo);
+      const existing = rebuilt[id];
+      if (existing) {
+        existing.weight += edge.weight;
+        existing.firstSeen = Math.min(existing.firstSeen || edge.firstSeen, edge.firstSeen || existing.firstSeen);
+        existing.lastSeen = Math.max(existing.lastSeen, edge.lastSeen);
+        for (const mid of edge.memoryIds) {
+          if (!existing.memoryIds.includes(mid)) existing.memoryIds.push(mid);
+        }
+      } else {
+        rebuilt[id] = { ...edge, id, from: nextFrom, to: nextTo };
+      }
+    }
+    this.data.edges = rebuilt;
+
+    delete this.data.nodes[from];
+    this.data.aliases[from] = to;
+    return to;
+  }
+
+  /** 已知别名数量，便于前端提示 */
+  get aliasCount(): number {
+    return Object.keys(this.data.aliases).length;
   }
 
   snapshot(): GraphSnapshot {
@@ -182,7 +292,7 @@ export class MemoryGraph {
   }
 
   async clear(): Promise<void> {
-    this.data = { version: 1, updatedAt: Date.now(), nodes: {}, edges: {} };
+    this.data = { version: 2, updatedAt: Date.now(), nodes: {}, edges: {}, aliases: {} };
     await this.save();
   }
 }

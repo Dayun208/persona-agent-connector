@@ -128,6 +128,13 @@ export function createApi(runtime: Runtime): Router {
     return { json: runtime.graphSnapshot() };
   });
 
+  router.post('/api/graph/merge', async (ctx) => {
+    const body = (ctx.body ?? {}) as { from?: string; to?: string };
+    if (!body.from || !body.to) return { status: 400, json: { error: '需要 from 与 to' } };
+    const r = await runtime.mergeGraphNodes(body.from, body.to);
+    return { json: r };
+  });
+
   router.post('/api/graph/rebuild', async () => {
     try {
       return { json: { ok: true, ...(await runtime.rebuildGraph()) } };
