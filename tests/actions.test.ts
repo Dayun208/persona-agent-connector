@@ -24,16 +24,24 @@ describe('ActionGuard 权限', () => {
       { isAdmin: false, allowUserActions: false },
     );
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toContain('高危');
+    if (!r.ok) expect(r.reason).toContain('只允许管理员');
   });
 
-  it('allowUserActions 打开后普通用户可触发', () => {
+  it('allowUserActions 打开后，群管理仍然只认管理员', () => {
+    // 群友触发的消息可能被提示词注入，禁言/踢人不能靠 allowUserActions 放开
     const cfg = normalizeConfig({ behavior: { allowUserActions: true } });
     const guard = new ActionGuard(cfg.behavior);
     const r = guard.check(
       { action: 'group_manage', params: { op: 'ban', userId: '1' } },
       { isAdmin: false, allowUserActions: true },
     );
+    expect(r.ok).toBe(false);
+  });
+
+  it('allowUserActions 打开后，普通互动动作对群友开放', () => {
+    const cfg = normalizeConfig({ behavior: { allowUserActions: true, allowPoke: true } });
+    const guard = new ActionGuard(cfg.behavior);
+    const r = guard.check({ action: 'poke', params: { userId: '10001' } }, { isAdmin: false, allowUserActions: true });
     expect(r.ok).toBe(true);
   });
 

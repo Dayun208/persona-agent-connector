@@ -18,6 +18,8 @@ export interface ActionSpec {
   privileged: boolean;
   /** 对应的配置开关 */
   flag?: FlagKey;
+  /** 危险动作：即使开了 allowUserActions，也只允许管理员触发 */
+  adminOnly?: boolean;
   /** 参数要求 */
   requiredAny?: string[];
   requiredAll?: string[];
@@ -42,6 +44,7 @@ export const ACTION_SPECS: ActionSpec[] = [
   },
   {
     name: 'send_file',
+    adminOnly: true,
     prompt: '向群里发送文件, params.file 为本地路径或 URL, params.name 为展示文件名',
     privileged: true,
     flag: 'allowFileSend',
@@ -50,6 +53,7 @@ export const ACTION_SPECS: ActionSpec[] = [
   },
   {
     name: 'group_manage',
+    adminOnly: true,
     prompt:
       '群管理, params.op 取: ban(禁言, 附 durationSec) / kick(踢人) / set_card(改名片, 附 card) / '
       + 'whole_ban(全员禁言, 附 enable) / set_name(改群名, 附 name) / set_admin(设管理员, 附 enable) / '
@@ -78,6 +82,7 @@ export const ACTION_SPECS: ActionSpec[] = [
   },
   {
     name: 'recall',
+    adminOnly: true,
     prompt: '撤回消息, params.messageId 省略时撤回机器人上一条消息',
     privileged: true,
     flag: 'allowRecall',
@@ -119,6 +124,7 @@ export class ActionGuard {
 
   isAllowed(spec: ActionSpec, ctx: ActionContext): boolean {
     if (spec.flag && !this.behavior[spec.flag]) return false;
+    if (spec.adminOnly && !ctx.isAdmin) return false;
     if (spec.privileged && !ctx.isAdmin && !ctx.allowUserActions) return false;
     return true;
   }
@@ -130,6 +136,9 @@ export class ActionGuard {
     }
     if (spec.flag && !this.behavior[spec.flag]) {
       return { ok: false, reason: `管理员未开启 ${spec.name} (behavior.${spec.flag}=false)` };
+    }
+    if (spec.adminOnly && !ctx.isAdmin) {
+      return { ok: false, reason: `${spec.name} 只允许管理员触发` };
     }
     if (spec.privileged && !ctx.isAdmin && !this.behavior.allowUserActions) {
       return { ok: false, reason: `${spec.name} 是高危动作, 只有管理员可以触发` };

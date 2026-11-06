@@ -30,6 +30,7 @@ import type { NapCatClient } from '@pasc/napcat';
 import type { AgentTransport, AgentAttachment } from '@pasc/agent';
 import { homedir } from 'node:os';
 import { readFile, readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 export type PipelineEventType =
   | 'message'
@@ -101,8 +102,11 @@ export class Pipeline {
   private readonly sent: SentRecord[] = [];
   /** 图片识别结果缓存：image file → 文本（同一张图只识别一次） */
   private readonly imageNotes = new Map<string, string>();
-  /** 待附给 Agent 的图片（处理完即清空） */
-  private readonly pendingAttachments: AgentAttachment[] = [];
+  /**
+   * 待附给 Agent 的图片，按"触发消息 id"隔离。
+   * 之前是全局数组，谁回复就取走全部 —— 图片会串到别的会话去。
+   */
+  private readonly attachmentsByMessage = new Map<string, AgentAttachment[]>();
   /** 开发模式：sceneKey → 到期时间戳。到期自动恢复人格 */
   private readonly devModeUntil = new Map<string, number>();
 
@@ -366,7 +370,9 @@ export class Pipeline {
       });
 
       const agent = getAgent();
-      const attachments = this.pendingAttachments.splice(0, this.pendingAttachments.length);
+      // 只取这条消息自己的图；没有就一个都不带
+      const attachments = this.attachmentsByMessage.get(trigger.id) ?? [];
+      this.attachmentsByMessage.delete(trigger.id);
       const response = await agent.send({
         system: bundle.system,
         user: bundle.user,
@@ -609,11 +615,23 @@ export class Pipeline {
         }
         try {
           const buf = await readFile(hostPath);
-          this.pendingAttachments.push({
+          const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+          if (buf.byteLength > MAX_IMAGE_BYTES) {
+            logger.warn('图片过大，跳过', { file: img.file, bytes: buf.byteLength });
+            continue;
+          }
+          const list = this.attachmentsByMessage.get(msg.id) ?? [];
+          list.push({
             mimeType: img.file.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
             fileName: img.file,
             dataBase64: buf.toString('base64'),
           });
+          this.attachmentsByMessage.set(msg.id, list);
+          // 只保留最近 200 条消息的附件，避免没人回复时无限堆积
+          if (this.attachmentsByMessage.size > 200) {
+            const oldest = this.attachmentsByMessage.keys().next().value;
+            if (oldest !== undefined) this.attachmentsByMessage.delete(oldest);
+          }
           msg.text = `${msg.text}\n[图片]`.trim();
           logger.info('图片已附到请求上', { file: img.file, bytes: buf.byteLength });
         } catch (err) {
@@ -709,7 +727,13 @@ export class Pipeline {
     const from = cfg.vision.mountFrom.replace(/\/+$/, '');
     if (!from || !containerPath.startsWith(from)) return containerPath;
     const to = (cfg.vision.mountTo || `${homedir()}/pasc-docker/napcat/qq`).replace(/\/+$/, '');
-    return to + containerPath.slice(from.length);
+    const resolved = resolve(to + containerPath.slice(from.length));
+    // 防止 get_image 返回 "../../etc/passwd" 这类路径把文件读出挂载目录
+    if (resolved !== to && !resolved.startsWith(`${to}/`)) {
+      this.deps.logger.warn('图片路径越界，已拒绝', { containerPath, resolved });
+      return '';
+    }
+    return resolved;
   }
 
   /** 最近在会话里出现过的成员（去重、带上触发者），用于让模型把昵称映射成 QQ 号 */

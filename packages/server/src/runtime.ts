@@ -246,6 +246,7 @@ export class Runtime {
 
   async stop(): Promise<void> {
     if (this.decayTimer) clearInterval(this.decayTimer);
+    if (this.autoDistillTimer) clearInterval(this.autoDistillTimer);
     await this.memories.close();
     if (this.archive instanceof SqliteArchive) this.archive.close();
     await this.napcatClient.stop();

@@ -106,6 +106,8 @@ export async function understandImage(
     return undefined;
   }
   if (buf.byteLength === 0) return undefined;
+  // base64 后体积会涨 1/3，太大既占内存也超出多数模型的请求上限
+  if (buf.byteLength > 8 * 1024 * 1024) return undefined;
 
   const dataUri = toDataUri(buf, file);
   const started = Date.now();

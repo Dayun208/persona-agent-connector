@@ -187,3 +187,19 @@ describe('#status 命令', () => {
     expect(sent.join()).toContain('PASC');
   });
 });
+
+describe('图片附件隔离', () => {
+  it('A 会话的图不会被 B 会话的回复带走', async () => {
+    const { pipeline, agentCalls } = makePipeline(['999']);
+    // A 会话收到带图的消息（不会触发回复），B 会话随后正常回复
+    const withImage = {
+      ...(msg('111', '看这张图') as Record<string, unknown>),
+      segments: [{ type: 'image', file: 'x.png' }],
+    };
+    await pipeline.ingest(withImage as never);
+    await pipeline.ingest(msg('111', '随便说句'));
+    await new Promise((r) => setTimeout(r, 60));
+    // 没有任何调用带上附件
+    expect(agentCalls.every((c) => !(c as { attachments?: unknown }).attachments)).toBe(true);
+  });
+});
