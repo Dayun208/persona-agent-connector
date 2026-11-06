@@ -143,6 +143,14 @@ export function createApi(runtime: Runtime): Router {
     }
   });
 
+  router.post('/api/memory/reflect', async () => {
+    try {
+      return { json: { ok: true, ...(await runtime.reflectMemories()) } };
+    } catch (err) {
+      return { status: 400, json: { error: err instanceof Error ? err.message : String(err) } };
+    }
+  });
+
   router.get('/api/audits', async (ctx) => {
     const limit = clampInt(ctx.query.get('limit'), 100, 1, 500);
     return { json: { items: await runtime.recentAudits(limit) } };

@@ -39,7 +39,7 @@ import { NapCatClient, type NapCatStatus } from '@pasc/napcat';
 import { createAgentTransport, probeAgent, type AgentTransport } from '@pasc/agent';
 import type { CompleteOptions, LlmMessage } from '@pasc/core';
 import { Pipeline, type PipelineEvent } from './pipeline.js';
-import { findUnknownConfigKeys, ExecutionLog, AuditLog, MemoryGraph, extractGraph, distillPersona, extractQaPairs, extractEpisode, extractionOptionsFrom, collectUserMessages, type TextCompleter, type AuditRecord } from '@pasc/core';
+import { findUnknownConfigKeys, ExecutionLog, AuditLog, MemoryGraph, extractGraph, groupForReflection, reflectGroup, distillPersona, extractQaPairs, extractEpisode, extractionOptionsFrom, collectUserMessages, type TextCompleter, type AuditRecord } from '@pasc/core';
 
 export interface RuntimePaths {
   home: string;
@@ -1080,6 +1080,54 @@ export class Runtime {
     this.audit
       .append({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ts: Date.now(), ...record })
       .catch(() => undefined);
+  }
+
+  /**
+   * 记忆反思：把散落的同类记忆合并成一条，并标记被推翻的旧说法。
+   * 走和抽取同一套模型（默认 DeepSeek），不占本地显存。
+   */
+  async reflectMemories(): Promise<{
+    groups: number;
+    merged: number;
+    absorbed: number;
+    superseded: number;
+    before: number;
+    after: number;
+  }> {
+    const client = this.extractClient();
+    if (!client?.configured) throw new Error('未配置抽取模型');
+
+    const active = this.memories.list({ limit: 500, status: 'active' });
+    const before = active.length;
+    const groups = groupForReflection(
+      active.map((m) => ({ id: m.id, text: m.text, type: m.type, createdAt: m.createdAt, tags: m.tags, subjects: m.subjects })),
+      { maxGroups: 8 },
+    );
+
+    let merged = 0;
+    let absorbed = 0;
+    let superseded = 0;
+    for (const group of groups) {
+      const result = await reflectGroup(client as never, group, { logger: this.logger.child('memory') });
+      if (!result) continue;
+
+      for (const item of result.superseded) {
+        if (this.memories.supersede(item.id, item.reason)) superseded += 1;
+      }
+      const applied = await this.memories.consolidate({
+        text: result.text,
+        type: result.type,
+        importance: result.importance,
+        sourceIds: result.sourceIds,
+      });
+      merged += 1;
+      absorbed += applied.absorbed;
+    }
+    await this.memories.flush();
+
+    const after = this.memories.list({ limit: 500, status: 'active' }).length;
+    this.logger.info('记忆反思完成', { groups: groups.length, merged, absorbed, superseded, before, after });
+    return { groups: groups.length, merged, absorbed, superseded, before, after };
   }
 
   /** 给前端/接口读审计记录 */

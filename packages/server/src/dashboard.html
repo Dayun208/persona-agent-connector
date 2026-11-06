@@ -595,6 +595,7 @@
           <button class="btn sm" id="btn-mem-search">搜索</button>
           <button class="btn sm" id="btn-mem-clear">全部</button>
           <span class="spacer"></span>
+          <button class="btn sm" id="btn-mem-reflect" title="把同类记忆合并成一条">反思合并</button>
           <button class="btn sm" id="btn-mem-decay">执行衰减</button>
         </div>
         <div class="qalist" id="mem-list" style="flex:1; margin-top:12px;"></div>
@@ -2051,6 +2052,24 @@ $('#btn-mem-search').onclick = async () => {
 };
 $('#mem-q').onkeydown = (e) => { if (e.key === 'Enter') $('#btn-mem-search').click(); };
 $('#btn-mem-clear').onclick = () => { $('#mem-q').value = ''; loadMemory(); };
+$('#btn-mem-reflect').onclick = async () => {
+  const btn = $('#btn-mem-reflect');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '反思中…';
+  try {
+    const r = await api('/api/memory/reflect', { method: 'POST' });
+    if (r.error) { toast('反思失败：' + r.error); return; }
+    toast(`反思完成：${r.merged} 组合并，吸收 ${r.absorbed} 条，${r.superseded} 条标记过时（${r.before} → ${r.after}）`);
+    loadMemory();
+  } catch (e) {
+    toast('反思失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+};
+
 $('#btn-mem-decay').onclick = async () => {
   try { const r = await api('/api/memory/decay', { method: 'POST' }); toast('衰减完成，归档 ' + (r.archived || 0) + ' 条'); loadMemory(); }
   catch (e) { toast('衰减失败：' + e.message); }

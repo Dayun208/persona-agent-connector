@@ -37,3 +37,5 @@ export * from './vision.js';
 export * from './audit-log.js';
 
 export * from './memory-graph.js';
+
+export * from './memory-reflect.js';

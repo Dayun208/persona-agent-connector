@@ -21,7 +21,7 @@ import { similarity } from './text.js';
  */
 
 export type MemoryType = 'fact' | 'preference' | 'relationship' | 'plan' | 'event' | 'episode' | 'unknown';
-export type MemoryStatus = 'active' | 'archived' | 'forgotten';
+export type MemoryStatus = 'active' | 'archived' | 'forgotten' | 'merged';
 
 export const MEMORY_TYPES: MemoryType[] = ['fact', 'preference', 'relationship', 'plan', 'event', 'episode', 'unknown'];
 
@@ -48,6 +48,8 @@ export interface MemoryRecord {
   embedding?: number[];
   /** 向量由哪个模型算出；换了模型后旧向量不可比，需要重建 */
   embeddingModel?: string;
+  /** 被哪条记忆合并掉了（status=merged 时有值），便于追溯 */
+  mergedInto?: string;
 }
 
 export interface MemorySearchHit extends MemoryHit {
@@ -72,6 +74,8 @@ export interface AddMemoryInput {
   sceneKey?: string;
   personaId?: string;
   sourceIds?: string[];
+  /** true 时跳过"相似记忆合并"，强制新建（反思合并要用） */
+  skipMerge?: boolean;
 }
 
 export interface MemoryEngineDeps {
@@ -139,7 +143,7 @@ export class MemoryEngine {
 
     // 1) 相似记忆合并(去重)
     let best: { record: MemoryRecord; score: number } | undefined;
-    for (const record of this.records) {
+    for (const record of input.skipMerge ? [] : this.records) {
       if (record.status !== 'active') continue;
       const score = similarity(text, record.text);
       if (score >= cfg.mergeThreshold && (!best || score > best.score)) best = { record, score };
@@ -204,6 +208,76 @@ export class MemoryEngine {
    * @param opts.force 连已有的也重算
    * @param opts.limit 本次最多处理多少条（大库分批用）
    */
+  /**
+   * 反思合并：写入一条合并后的记忆，并把参与合并的原条目标记为 merged。
+   * 原条目不会被删除 —— 保留 mergedInto 方便追溯"这句话是从哪来的"。
+   */
+  async consolidate(input: {
+    text: string;
+    type?: MemoryType;
+    importance?: number;
+    sourceIds: string[];
+    tags?: string[];
+    subjects?: string[];
+  }): Promise<{ record: MemoryRecord; absorbed: number }> {
+    const cfg = this.deps.getConfig();
+    const sourceSet = new Set(input.sourceIds);
+
+    // 已经有一条内容相近的活跃记忆（且不在本次来源里）→ 直接并进它，
+    // 否则每反思一次就会多出一条近重复的记忆
+    let target = this.records.find(
+      (r) => r.status === 'active' && !sourceSet.has(r.id) && similarity(input.text, r.text) >= cfg.mergeThreshold,
+    );
+
+    if (target) {
+      target.text = input.text.length > target.text.length ? input.text : target.text;
+      target.importance = Math.max(target.importance, input.importance ?? 0.6);
+      target.tags = unique([...target.tags, ...(input.tags ?? [])]);
+      target.subjects = unique([...target.subjects, ...(input.subjects ?? [])]);
+      target.updatedAt = this.now;
+      target.lastAccessedAt = this.now;
+    } else {
+      const created = await this.add({
+        text: input.text,
+        ...(input.type ? { type: input.type } : {}),
+        importance: input.importance ?? 0.6,
+        tags: input.tags ?? [],
+        subjects: input.subjects ?? [],
+        // 强制新建：add() 的相似合并可能挑到本次来源里的某一条，
+        // 那条接着又会被标记 merged，自相矛盾
+        skipMerge: true,
+      });
+      target = created.record;
+    }
+
+    let absorbed = 0;
+    for (const id of input.sourceIds) {
+      if (id === target.id) continue;
+      const source = this.records.find((r) => r.id === id);
+      if (!source || source.status !== 'active') continue;
+      source.status = 'merged';
+      source.mergedInto = target.id;
+      source.updatedAt = this.now;
+      absorbed += 1;
+    }
+
+    // 合并出来的记录要带上来源，方便回溯
+    target.sourceIds = unique([...target.sourceIds, ...input.sourceIds]);
+    this.markDirty();
+    return { record: target, absorbed };
+  }
+
+  /** 标记某条记忆过时（被新说法推翻） */
+  supersede(id: string, reason?: string): boolean {
+    const record = this.records.find((r) => r.id === id);
+    if (!record || record.status !== 'active') return false;
+    record.status = 'archived';
+    record.updatedAt = this.now;
+    if (reason) record.tags = unique([...record.tags, 'superseded']);
+    this.markDirty();
+    return true;
+  }
+
   async backfill(
     opts: { force?: boolean; limit?: number; batchSize?: number } = {},
   ): Promise<{ scanned: number; updated: number; failed: number; remaining: number }> {

@@ -226,3 +226,29 @@ describe('embedding 回填', () => {
     expect(r.failed).toBe(0);
   });
 });
+
+describe('反思合并', () => {
+  it('consolidate 写入合并记录并把原条目标记 merged', async () => {
+    const engine = await makeEngine();
+    const a = await engine.add({ text: '张三在杭州读研', type: 'fact' });
+    const b = await engine.add({ text: '张三保研了', type: 'fact' });
+    const r = await engine.consolidate({
+      text: '张三在杭州读研并已保研',
+      type: 'fact',
+      importance: 0.8,
+      sourceIds: [a.record.id, b.record.id],
+    });
+    expect(r.absorbed).toBe(2);
+    const statuses = engine.list({ limit: 10 }).map((m) => [m.text, m.status]);
+    const merged = statuses.find(([t]) => t === '张三在杭州读研');
+    expect(merged?.[1]).toBe('merged');
+    expect(engine.list({ limit: 10, status: 'merged' }).length).toBe(2);
+  });
+
+  it('supersede 把旧记忆归档', async () => {
+    const engine = await makeEngine();
+    const a = await engine.add({ text: '住在杭州', type: 'fact' });
+    expect(engine.supersede(a.record.id, '已搬家')).toBe(true);
+    expect(engine.list({ limit: 10, status: 'archived' }).some((m) => m.id === a.record.id)).toBe(true);
+  });
+});
