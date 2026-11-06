@@ -205,7 +205,7 @@ export class NapCatClient extends EventEmitter<NapCatEvents> {
    */
   async getImage(file: string): Promise<{ file?: string; url?: string; error?: string } | undefined> {
     let lastError = '';
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
       try {
         const raw = (await this.call('get_image', { file })) as { data?: { file?: string; url?: string } };
         if (raw?.data?.file) return raw.data;
@@ -213,7 +213,7 @@ export class NapCatClient extends EventEmitter<NapCatEvents> {
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
       }
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 250 * attempt));
+      if (attempt < 5) await new Promise((r) => setTimeout(r, 200 * attempt));
     }
     return { error: lastError };
   }

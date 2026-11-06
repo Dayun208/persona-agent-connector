@@ -29,7 +29,7 @@ import {
 import type { NapCatClient } from '@pasc/napcat';
 import type { AgentTransport, AgentAttachment } from '@pasc/agent';
 import { homedir } from 'node:os';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 
 export type PipelineEventType =
   | 'message'
@@ -428,13 +428,18 @@ export class Pipeline {
           logger.warn('图片缺 file 字段，无法取回', { sceneKey: msg.sceneKey });
           continue;
         }
+        let hostPath = '';
         const info = await napcat.getImage(img.file);
-        if (!info?.file) {
-          logger.warn('get_image 失败，图片无法附上', { file: img.file, error: info?.error ?? '未知' });
+        if (info?.file) hostPath = this.toHostPath(info.file, cfg);
+        // get_image 拿不到（刚收到的图 NapCat 还没落盘 / 返回空 data）时，
+        // 直接在宿主机挂载盘里按文件名找 —— 图最终一定落在那里
+        if (!hostPath) hostPath = (await this.findImageOnDisk(img.file, cfg)) ?? '';
+        if (!hostPath) {
+          logger.warn('图片定位失败，无法附上', { file: img.file, error: info?.error ?? '未知' });
           continue;
         }
         try {
-          const buf = await readFile(this.toHostPath(info.file, cfg));
+          const buf = await readFile(hostPath);
           this.pendingAttachments.push({
             mimeType: img.file.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
             fileName: img.file,
@@ -443,7 +448,7 @@ export class Pipeline {
           msg.text = `${msg.text}\n[图片]`.trim();
           logger.info('图片已附到请求上', { file: img.file, bytes: buf.byteLength });
         } catch (err) {
-          logger.warn('图片读取失败', { file: img.file, path: this.toHostPath(info.file, cfg), error: err instanceof Error ? err.message : String(err) });
+          logger.warn('图片读取失败', { file: img.file, path: hostPath, error: err instanceof Error ? err.message : String(err) });
         }
       }
       return;
@@ -482,6 +487,52 @@ export class Pipeline {
     }
 
     if (notes.length > 0) msg.text = `${msg.text}\n${notes.join('\n')}`.trim();
+  }
+
+  /**
+   * 在 NapCat 的宿主机挂载盘里按文件名找图。
+   * 目录结构固定：nt_data/{Pic/YYYY-MM/Ori,Emoji/emoji-recv/YYYY-MM/...}/<md5>.<ext>
+   * 图会被 NapCat 改名为小写 md5，所以按小写比对。
+   */
+  private async findImageOnDisk(fileName: string, cfg: PascConfig): Promise<string | undefined> {
+    const root = (cfg.vision.mountTo || `${homedir()}/pasc-docker/napcat/qq`).replace(/\/+$/, '');
+    const target = fileName.toLowerCase();
+    const stem = target.replace(/\.[a-z0-9]+$/, '');
+    const bases = ['nt_data/Pic', 'nt_data/Emoji'];
+
+    const walk = async (dir: string, depth: number): Promise<string | undefined> => {
+      if (depth > 3) return undefined;
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return undefined;
+      }
+      for (const e of entries) {
+        const full = `${dir}/${e.name}`;
+        if (e.isDirectory()) {
+          const hit = await walk(full, depth + 1);
+          if (hit) return hit;
+        } else if (e.name.toLowerCase() === target || e.name.toLowerCase().includes(stem)) {
+          return full;
+        }
+      }
+      return undefined;
+    };
+
+    try {
+      const qqDirs = await readdir(root, { withFileTypes: true });
+      for (const d of qqDirs) {
+        if (!d.isDirectory() || !d.name.startsWith('nt_qq_')) continue;
+        for (const base of bases) {
+          const hit = await walk(`${root}/${d.name}/${base}`, 0);
+          if (hit) return hit;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return undefined;
   }
 
   /** 容器内路径 → 宿主机路径（NapCat 跑在 Docker 里） */
