@@ -119,21 +119,22 @@ describe('单条消息命令', () => {
   });
 });
 
-describe('前缀兼容', () => {
-  it('不带 # 的裸 dev on 也能识别', async () => {
-    const { pipeline } = makePipeline(['999']);
+describe('前缀', () => {
+  it('不带 # 的裸 dev 不再生效', async () => {
+    const { pipeline, sent } = makePipeline(['999']);
     await pipeline.ingest(msg('999', 'dev on'));
-    expect(pipeline.isDevMode('group:1')).toBe(true);
+    expect(pipeline.isDevMode('group:1')).toBe(false);
+    expect(sent.join()).not.toContain('开发模式');
   });
 
-  it('/dev 和 !dev 同样可用', async () => {
+  it('/dev 和 !dev 也不再生效', async () => {
     const a = makePipeline(['999']);
     await a.pipeline.ingest(msg('999', '/dev on'));
-    expect(a.pipeline.isDevMode('group:1')).toBe(true);
+    expect(a.pipeline.isDevMode('group:1')).toBe(false);
 
     const b = makePipeline(['999']);
     await b.pipeline.ingest(msg('999', '!dev on'));
-    expect(b.pipeline.isDevMode('group:1')).toBe(true);
+    expect(b.pipeline.isDevMode('group:1')).toBe(false);
   });
 
   it('developer 这种普通单词不会被误判', async () => {
@@ -143,9 +144,9 @@ describe('前缀兼容', () => {
     expect(sent.join()).not.toContain('开发模式');
   });
 
-  it('@机器人 + 裸 dev ask 也能走单条命令', async () => {
+  it('@机器人 + #dev ask 走单条命令', async () => {
     const { pipeline, builtCtx } = makePipeline(['999']);
-    await pipeline.ingest(msg('999', '@2959515696 dev ask 你好'));
+    await pipeline.ingest(msg('999', '@2959515696 #dev ask 你好'));
     await new Promise((r) => setTimeout(r, 60));
     expect(builtCtx[0]?.devMode).toBe(true);
     expect(builtCtx[0]?.triggerText).toBe('你好');
