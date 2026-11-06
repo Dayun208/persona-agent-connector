@@ -550,6 +550,6 @@ pnpm dev           # 同时起 server 与 fake-napcat
 
 ## 许可证
 
-MIT © PASC contributors
+AGPL-3.0 © PASC contributors
 
 用之前请先读一遍 [安全提示](#安全提示)：这个项目会把 QQ 账号的很高权限交给一个语言模型，跑在公开群里之前请务必想清楚。

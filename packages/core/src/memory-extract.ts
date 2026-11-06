@@ -48,12 +48,23 @@ export const MEMORY_EXTRACT_PROMPT = `你是一个长期记忆整理器。阅读
 - 只输出 JSON 数组, 不要任何解释`;
 
 /** 把消息列表压成给抽取模型看的一段对话 */
+/**
+ * 把对话渲染成模型能读的格式。
+ * 带上昵称、QQ 号和时间 —— 没有时间模型就无法把"下周三"换算成具体日期，
+ * 不区分 Bot 自己说的话，就会把自己的发言记成别人说的。
+ */
 export function formatDialogue(messages: ChatMessage[], maxChars = 6_000): string {
+  const fmtTime = (ts: number): string => {
+    const d = new Date(ts);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
   const lines = messages
     .map((m) => {
       const text = spokenText(m.text);
       if (!text) return '';
-      return `${m.senderName}(${m.senderId}): ${text}`;
+      const who = m.isSelf ? `[Bot: ${m.senderName} | ID: ${m.senderId} | ${fmtTime(m.timestamp)}]` : `[${m.senderName} | ID: ${m.senderId} | ${fmtTime(m.timestamp)}]`;
+      return `${who} ${text}`;
     })
     .filter(Boolean);
 
@@ -74,6 +85,102 @@ export function formatDialogue(messages: ChatMessage[], maxChars = 6_000): strin
 export interface TextCompleter {
   configured: boolean;
   complete(messages: LlmMessage[], opts?: CompleteOptions): Promise<{ text: string }>;
+}
+
+/**
+ * 会话摘要抽取 —— 思路参考 LivingMemory（AGPL-3.0，见 NOTICE）。
+ *
+ * 和"抽原子事实"不同，这里把一段对话压成一条可回溯的"剧集"：
+ *   canonical（客观）用于检索，firstPerson（带人设语气）用于注入时的温度。
+ * 关键约束：相对时间必须换算成具体日期，否则"下周三"过一周就失效了。
+ */
+export interface EpisodeSummary {
+  canonical: string;
+  firstPerson: string;
+  topics: string[];
+  keyFacts: string[];
+  participants: string[];
+  sentiment: 'positive' | 'neutral' | 'negative';
+  importance: number;
+}
+
+export const EPISODE_PROMPT = `你在整理一段群聊的长期记忆。输出一个 JSON 对象，不要输出任何别的内容。
+
+时间要求：把"今天/明天/昨天/下周/上周"等相对时间，按消息里的时间戳换算成具体日期再写。
+
+人称要求：
+- [Bot: ...] 开头的是你自己说的话，用第一人称描述（"我回了…""我建议…"）
+- 其余消息必须写具体昵称（"张三说…"），不许用"用户""群友""某人"
+
+字段：
+{
+  "canonical": "客观中性的摘要，只写参与者、事件、时间、结论，不带语气词",
+  "firstPerson": "第一人称回忆，可以带你对气氛的感受",
+  "topics": ["主题，最多 5 个"],
+  "keyFacts": ["关键事实，最多 5 条，必须带人名和日期"],
+  "participants": ["所有发言者昵称"],
+  "sentiment": "positive|neutral|negative",
+  "importance": 0.0-1.0
+}
+
+importance 参考：群体决策/明确计划 0.8+；有结论的讨论 0.6-0.7；日常交流 0.4-0.5；闲聊灌水 0.1-0.3。
+
+没有值得记的内容时，输出 {"canonical":"","firstPerson":"","topics":[],"keyFacts":[],"participants":[],"sentiment":"neutral","importance":0}`;
+
+export async function extractEpisode(
+  client: TextCompleter,
+  messages: ChatMessage[],
+  opts: { minImportance?: number } = {},
+): Promise<{ episode?: EpisodeSummary; warning?: string; raw?: string }> {
+  const dialogue = formatDialogue(messages);
+  if (!dialogue.trim()) return { warning: '没有可用对话' };
+
+  let raw = '';
+  try {
+    const res = await client.complete(
+      [
+        { role: 'system', content: EPISODE_PROMPT },
+        { role: 'user', content: `群聊片段：\n${dialogue}` },
+      ],
+      { temperature: 0.2, maxTokens: 700, json: true },
+    );
+    raw = res.text;
+  } catch (err) {
+    return { warning: `摘要模型调用失败: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  const parsed = extractJsonValue(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { warning: '模型输出不是 JSON 对象', raw };
+  }
+  const obj = parsed as Record<string, unknown>;
+  const text = typeof obj.canonical === 'string' ? obj.canonical.trim() : '';
+  if (!text) return { warning: '摘要为空', raw };
+
+  const importance = typeof obj.importance === 'number' ? obj.importance : 0.5;
+  const minImportance = opts.minImportance ?? 0.4;
+  if (importance < minImportance) return { warning: '重要度不足，已丢弃', raw };
+
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim()) : [];
+
+  const sentimentRaw = String(obj.sentiment ?? 'neutral');
+  const sentiment = ['positive', 'neutral', 'negative'].includes(sentimentRaw)
+    ? (sentimentRaw as EpisodeSummary['sentiment'])
+    : 'neutral';
+
+  return {
+    episode: {
+      canonical: text,
+      firstPerson: typeof obj.firstPerson === 'string' ? obj.firstPerson.trim() : text,
+      topics: arr(obj.topics).slice(0, 5),
+      keyFacts: arr(obj.keyFacts).slice(0, 5),
+      participants: arr(obj.participants).slice(0, 10),
+      sentiment,
+      importance: Math.min(1, Math.max(0, importance)),
+    },
+    raw,
+  };
 }
 
 export async function extractMemoryCandidates(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractMemoryCandidates, formatDialogue, type ChatClient } from '@pasc/core';
+import { extractEpisode, extractMemoryCandidates, formatDialogue, type ChatClient } from '@pasc/core';
 import { makeMessages } from './helpers.js';
 
 function fakeClient(output: string): ChatClient {
@@ -12,9 +12,10 @@ function fakeClient(output: string): ChatClient {
 const messages = makeMessages(['阿琳: 我最近在杭州读研', '老陈: 你养的那只猫叫什么', '阿琳: 叫年糕, 一只橘猫']);
 
 describe('formatDialogue', () => {
-  it('渲染成 昵称(QQ): 内容', () => {
+  it('渲染成 [昵称 | ID | 时间] 内容', () => {
     const text = formatDialogue(messages);
-    expect(text).toContain('测试用户(10001): 阿琳: 我最近在杭州读研');
+    expect(text).toContain('测试用户 | ID: 10001');
+    expect(text).toContain('阿琳: 我最近在杭州读研');
     expect(text.split('\n')).toHaveLength(3);
   });
 
@@ -85,5 +86,43 @@ describe('extractMemoryCandidates', () => {
     const r = await extractMemoryCandidates(broken, messages, {});
     expect(r.candidates).toHaveLength(0);
     expect(r.warnings[0]).toContain('boom');
+  });
+});
+
+describe('extractEpisode', () => {
+  it('解析出摘要并归一化字段', async () => {
+    const client = {
+      configured: true,
+      complete: async () => ({
+        text: JSON.stringify({
+          canonical: '张三组织 2026-11-20 滑雪团建，李四确认参加',
+          firstPerson: '我看到张三在张罗滑雪，李四很积极',
+          topics: ['团建', '滑雪'],
+          keyFacts: ['2026-11-20 滑雪团建'],
+          participants: ['张三', '李四'],
+          sentiment: 'positive',
+          importance: 0.8,
+        }),
+      }),
+    };
+    const r = await extractEpisode(client, makeMessages(['张三: 明天团建去不去']));
+    expect(r.episode?.canonical).toContain('滑雪');
+    expect(r.episode?.importance).toBe(0.8);
+    expect(r.episode?.sentiment).toBe('positive');
+  });
+
+  it('重要度不足时丢弃', async () => {
+    const client = {
+      configured: true,
+      complete: async () => ({ text: JSON.stringify({ canonical: '闲聊', importance: 0.1 }) }),
+    };
+    const r = await extractEpisode(client, makeMessages(['随便聊聊']), { minImportance: 0.4 });
+    expect(r.episode).toBeUndefined();
+  });
+
+  it('canonical 为空时视为没有内容', async () => {
+    const client = { configured: true, complete: async () => ({ text: '{"canonical":""}' }) };
+    const r = await extractEpisode(client, makeMessages(['无聊']));
+    expect(r.episode).toBeUndefined();
   });
 });

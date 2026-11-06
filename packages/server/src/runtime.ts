@@ -38,7 +38,7 @@ import { NapCatClient, type NapCatStatus } from '@pasc/napcat';
 import { createAgentTransport, probeAgent, type AgentTransport } from '@pasc/agent';
 import type { CompleteOptions, LlmMessage } from '@pasc/core';
 import { Pipeline, type PipelineEvent } from './pipeline.js';
-import { ExecutionLog, distillPersona, extractQaPairs, extractionOptionsFrom, collectUserMessages, type TextCompleter } from '@pasc/core';
+import { ExecutionLog, distillPersona, extractQaPairs, extractEpisode, extractionOptionsFrom, collectUserMessages, type TextCompleter } from '@pasc/core';
 
 export interface RuntimePaths {
   home: string;
@@ -488,6 +488,33 @@ export class Runtime {
       ...(sceneKey ? { sceneKey } : {}),
       sourceIds: messages.slice(-20).map((m) => m.id),
     });
+    // 再压一条"会话摘要"：原子事实记不住聊天的前因后果，摘要可以
+    let episodeAdded = 0;
+    try {
+      const { episode, warning } = await extractEpisode(client, messages, {
+        minImportance: cfg.autoExtract.minImportance,
+      });
+      if (episode) {
+        const got = await this.memories.ingest(
+          [
+            {
+              text: episode.canonical,
+              type: 'episode',
+              importance: episode.importance,
+              tags: [...episode.topics, ...episode.participants].slice(0, 8),
+              subjects: episode.participants,
+            },
+          ],
+          { ...(sceneKey ? { sceneKey } : {}), sourceIds: messages.slice(-20).map((m) => m.id) },
+        );
+        episodeAdded = got.added;
+      } else if (warning) {
+        this.logger.debug('会话摘要未生成', { reason: warning });
+      }
+    } catch (err) {
+      this.logger.warn('会话摘要失败', { error: err instanceof Error ? err.message : String(err) });
+    }
+
     await this.memories.flush();
 
     this.logger.info('记忆抽取完成', {
@@ -495,6 +522,7 @@ export class Runtime {
       candidates: extracted.candidates.length,
       added: ingested.added,
       merged: ingested.merged,
+      episode: episodeAdded,
     });
 
     return {

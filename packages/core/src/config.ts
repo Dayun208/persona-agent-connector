@@ -198,6 +198,8 @@ const MemoryTtlSchema = z
     relationship: z.number().int().positive().default(90),
     plan: z.number().int().positive().default(2),
     event: z.number().int().positive().default(7),
+    /** 会话摘要：比事实短命，比单次事件长 */
+    episode: z.number().int().positive().default(120),
     unknown: z.number().int().positive().default(30),
   })
   .default({});

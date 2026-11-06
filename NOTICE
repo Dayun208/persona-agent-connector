@@ -1,0 +1,20 @@
+PASC
+Copyright (C) 2026 PASC contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+本项目的部分设计思路与提示词结构参考了以下项目：
+
+  LivingMemory (astrbot_plugin_livingmemory)
+  https://github.com/lxfight-s-Astrbot-Plugins/astrbot_plugin_livingmemory
+  Copyright (C) LivingMemory contributors
+  Licensed under the GNU Affero General Public License v3.0
+
+具体借鉴的部分：会话记忆整理（第一人称摘要 + 客观摘要双通道、
+相对时间换算为绝对日期、区分机器人自身与他人发言）、
+以及对"记忆原子 + 时间衰减 + 强化"的整体设计取舍。
+
+由于 PASC 采用了 AGPL-3.0 许可，上述参考与衍生使用符合原项目的许可条款。

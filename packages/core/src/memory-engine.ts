@@ -20,10 +20,10 @@ import { similarity } from './text.js';
  * 没有 Embedding 时自动退化为纯关键词召回, 功能不缺失, 只是召回质量下降。
  */
 
-export type MemoryType = 'fact' | 'preference' | 'relationship' | 'plan' | 'event' | 'unknown';
+export type MemoryType = 'fact' | 'preference' | 'relationship' | 'plan' | 'event' | 'episode' | 'unknown';
 export type MemoryStatus = 'active' | 'archived' | 'forgotten';
 
-export const MEMORY_TYPES: MemoryType[] = ['fact', 'preference', 'relationship', 'plan', 'event', 'unknown'];
+export const MEMORY_TYPES: MemoryType[] = ['fact', 'preference', 'relationship', 'plan', 'event', 'episode', 'unknown'];
 
 export interface MemoryRecord {
   id: string;
