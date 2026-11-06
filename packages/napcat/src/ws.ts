@@ -41,6 +41,9 @@ export class WsTransport extends EventEmitter<TransportEvents> {
   private pending = new Map<string, PendingCall>();
   private reconnectAttempt = 0;
   private reconnectTimer: NodeJS.Timeout | undefined;
+  /** 心跳定时器：不 ping 的话 NapCat 会以 1005 关闭空闲连接 */
+  private heartbeatTimer: NodeJS.Timeout | undefined;
+  private lastPongAt = 0;
   private stopped = false;
   private statusValue: NapCatStatus = 'idle';
 
@@ -109,7 +112,10 @@ export class WsTransport extends EventEmitter<TransportEvents> {
     this.setStatus(this.reconnectAttempt === 0 ? 'connecting' : 'reconnecting');
 
     const url = this.buildUrl();
-    this.opts.logger.info('正在连接 NapCat WebSocket', { url: redactToken(url), attempt: this.reconnectAttempt + 1 });
+    // 第 1 次和每 10 次记 info，其余降到 debug —— 长时间离线时不会刷出上万行
+    const attempt = this.reconnectAttempt + 1;
+    const logFn = attempt === 1 || attempt % 10 === 0 ? 'info' : 'debug';
+    this.opts.logger[logFn]('正在连接 NapCat WebSocket', { url: redactToken(url), attempt });
 
     const headers: Record<string, string> = {};
     if (this.opts.token) headers.authorization = `Bearer ${this.opts.token}`;
@@ -129,6 +135,7 @@ export class WsTransport extends EventEmitter<TransportEvents> {
       this.setStatus('connected');
       this.opts.logger.info('NapCat WebSocket 已连接');
       this.emit('open');
+      this.startHeartbeat(ws);
     });
 
     ws.on('message', (data) => {
@@ -139,7 +146,12 @@ export class WsTransport extends EventEmitter<TransportEvents> {
       this.handleError(err);
     });
 
+    ws.on('pong', () => {
+      this.lastPongAt = Date.now();
+    });
+
     ws.on('close', (code: number, reason: Buffer) => {
+      this.stopHeartbeat();
       const text = reason?.toString() ?? '';
       this.opts.logger.warn('NapCat WebSocket 断开', { code, reason: text });
       this.ws = undefined;
@@ -177,6 +189,35 @@ export class WsTransport extends EventEmitter<TransportEvents> {
     }
 
     this.emit('event', payload as OneBotEvent);
+  }
+
+  /** 每 20 秒 ping 一次；60 秒没 pong 就当连接已死，主动断开重连 */
+  private startHeartbeat(ws: WebSocket): void {
+    this.stopHeartbeat();
+    this.lastPongAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (Date.now() - this.lastPongAt > 60_000) {
+        this.opts.logger.warn('NapCat 心跳超时，主动重连');
+        try {
+          ws.terminate();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      try {
+        ws.ping();
+      } catch {
+        /* ignore */
+      }
+    }, 20_000);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
   }
 
   private scheduleReconnect(): void {

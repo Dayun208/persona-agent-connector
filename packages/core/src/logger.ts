@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from 'node:fs/promises';
+import { appendFile, mkdir, rename, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -32,6 +32,10 @@ interface LogHub {
   file: string;
   silent: boolean;
   fileReady: boolean;
+  /** 已写入字节数，用于判断是否需要轮转 */
+  fileSize: number;
+  /** 是否已经读过一次真实大小 */
+  fileSizeKnown: boolean;
 }
 
 function createHub(opts: LoggerOptions): LogHub {
@@ -43,6 +47,8 @@ function createHub(opts: LoggerOptions): LogHub {
     file: opts.file ?? '',
     silent: opts.silent ?? false,
     fileReady: false,
+    fileSize: 0,
+    fileSizeKnown: false,
   };
 }
 
@@ -148,10 +154,39 @@ export class Logger {
         await mkdir(dirname(hub.file), { recursive: true });
         hub.fileReady = true;
       }
-      await appendFile(hub.file, formatEntry(entry) + '\n', 'utf8');
+      const line = formatEntry(entry) + '\n';
+      await this.rotateIfNeeded(hub, line.length);
+      await appendFile(hub.file, line, 'utf8');
     } catch {
       /* 日志落盘失败不影响主流程 */
     }
+  }
+
+  /**
+   * 按大小轮转日志。
+   * 之前没有轮转，NapCat 掉线那几天把 pasc.log 刷到 7MB 还在涨；
+   * 保留 3 份历史，总占用封顶 40MB。
+   */
+  private async rotateIfNeeded(hub: LogHub, incoming: number): Promise<void> {
+    const MAX_BYTES = 10 * 1024 * 1024;
+    const KEEP = 3;
+    if (!hub.fileSizeKnown) {
+      try {
+        hub.fileSize = (await stat(hub.file)).size;
+      } catch {
+        hub.fileSize = 0;
+      }
+      hub.fileSizeKnown = true;
+    }
+    if (hub.fileSize + incoming < MAX_BYTES) {
+      hub.fileSize += incoming;
+      return;
+    }
+    for (let i = KEEP - 1; i >= 1; i -= 1) {
+      await rename(`${hub.file}.${i}`, `${hub.file}.${i + 1}`).catch(() => undefined);
+    }
+    await rename(hub.file, `${hub.file}.1`).catch(() => undefined);
+    hub.fileSize = 0;
   }
 }
 

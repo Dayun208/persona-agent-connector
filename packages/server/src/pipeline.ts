@@ -424,9 +424,15 @@ export class Pipeline {
     // 走 Agent 视觉：不调本地模型，把图片字节附上去即可
     if (cfg.vision.mode === 'agent') {
       for (const img of images.slice(0, cfg.vision.maxImages)) {
-        if (!img.file) continue;
+        if (!img.file) {
+          logger.warn('图片缺 file 字段，无法取回', { sceneKey: msg.sceneKey });
+          continue;
+        }
         const info = await napcat.getImage(img.file);
-        if (!info?.file) continue;
+        if (!info?.file) {
+          logger.warn('get_image 没拿到容器路径（NapCat 可能正在重连）', { file: img.file });
+          continue;
+        }
         try {
           const buf = await readFile(this.toHostPath(info.file, cfg));
           this.pendingAttachments.push({
@@ -435,8 +441,9 @@ export class Pipeline {
             dataBase64: buf.toString('base64'),
           });
           msg.text = `${msg.text}\n[图片]`.trim();
-        } catch {
-          logger.debug('图片读取失败', { file: img.file });
+          logger.info('图片已附到请求上', { file: img.file, bytes: buf.byteLength });
+        } catch (err) {
+          logger.warn('图片读取失败', { file: img.file, path: this.toHostPath(info.file, cfg), error: err instanceof Error ? err.message : String(err) });
         }
       }
       return;
