@@ -328,6 +328,7 @@ export class Runtime {
       stats: this.stats,
       logger: this.logger.child('pipeline'),
       emit: (event) => this.bus.publish(event),
+      statusReport: (topic) => this.statusReport(topic),
       executions: this.executions,
     });
   }
@@ -890,6 +891,56 @@ export class Runtime {
       },
       pool: this.pool.stats(),
     };
+  }
+
+  /**
+   * 给 QQ 命令用的状态报告。
+   * 全部读本地真实状态，不经过大模型 —— 所以准确、即时、零成本。
+   */
+  async statusReport(topic?: string): Promise<string> {
+    const t = (topic || '').trim().toLowerCase();
+    const want = (key: string): boolean => !t || t.includes(key);
+    const lines: string[] = [];
+    const uptimeMin = Math.round((Date.now() - this.startedAt) / 60000);
+    const s = this.stats.snapshot();
+
+    if (want('pasc') || want('all')) {
+      lines.push(`PASC　运行中 · ${uptimeMin} 分钟`);
+    }
+    if (want('napcat') || want('all')) {
+      const self = this.napcatClient.selfId || this.config.napcat.selfId || '—';
+      lines.push(`NapCat　${this.napcatStatus} · 账号 ${self}`);
+    }
+    if (want('gateway') || want('gw') || want('all')) {
+      try {
+        const probe = await this.probeAgent();
+        lines.push(`Gateway　${probe.ok ? 'ok' : '不可用'} · ${probe.detail}`);
+      } catch (err) {
+        lines.push(`Gateway　探测失败 · ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (want('model') || want('judge') || want('all')) {
+      const j = this.config.judgeModel;
+      lines.push(`判断模型　${j.enabled ? (j.api.model || '未配置') : '已关闭'} · 阈值 ${j.replyThreshold}`);
+    }
+    if (want('embed') || want('memory') || want('all')) {
+      const q = this.embeddingQuality;
+      const h = this.stores.memories.embeddingHealth();
+      lines.push(
+        `向量　${q.checked ? (q.ok ? 'ok' : `降级(${q.reason ?? '退化'})`) : '未检测'} · ${h.embedded}/${h.total} 已向量化`,
+      );
+    }
+    if (want('queue') || want('pool') || want('all')) {
+      const pool = this.pool.allSceneKeys();
+      lines.push(`消息池　${pool.length} 个会话 · ${pool.reduce((n, k) => n + this.pool.size(k), 0)} 条`);
+    }
+    if (want('stat') || want('all')) {
+      lines.push(`今日　收 ${s.messagesIn} · 判断 ${s.judgeRuns} · 回复 ${s.replies} · 错误 ${s.errors}`);
+    }
+    if (lines.length === 0) {
+      return `未知项：${topic}\n可用：#status [pasc|napcat|gateway|model|embed|pool|stat]`;
+    }
+    return lines.join('\n');
   }
 
   async probeAgent(): Promise<{ ok: boolean; detail: string; sample?: string }> {

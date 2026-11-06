@@ -35,6 +35,8 @@ function makePipeline(admins: string[]) {
     stats: { messagesIn: 0, messagesFiltered: 0, directTriggers: 0, judgeRuns: 0, judgeHits: 0, replies: 0, executions: 0, executionRejected: 0, errors: 0, recordError() {}, recordReply() {}, recordJudge() {}, recordAgent() {}, recordPrompt() {} },
     logger: { info() {}, warn() {}, debug() {}, error() {} },
     emit: () => {},
+    statusReport: async (topic?: string) =>
+      topic === 'napcat' ? 'NapCat　connected · 账号 1' : ['PASC　运行中 · 1 分钟', 'NapCat　connected', '今日　收 0 · 回复 0'].join('\n'),
   } as never;
   return { pipeline: new Pipeline(deps), sent, agentCalls, builtCtx };
 }
@@ -150,5 +152,38 @@ describe('前缀', () => {
     await new Promise((r) => setTimeout(r, 60));
     expect(builtCtx[0]?.devMode).toBe(true);
     expect(builtCtx[0]?.triggerText).toBe('你好');
+  });
+});
+
+describe('#status 命令', () => {
+  it('管理员拿到真实状态报告', async () => {
+    const { pipeline, sent, agentCalls } = makePipeline(['999']);
+    await pipeline.ingest(msg('999', '#status'));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(sent.join()).toContain('PASC');
+    // 状态报告不经过大模型
+    expect(agentCalls).toHaveLength(0);
+  });
+
+  it('带话题只回对应项', async () => {
+    const { pipeline, sent } = makePipeline(['999']);
+    await pipeline.ingest(msg('999', '#status napcat'));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(sent.join()).toContain('NapCat');
+    expect(sent.join()).not.toContain('今日');
+  });
+
+  it('非管理员不生效', async () => {
+    const { pipeline, sent } = makePipeline(['999']);
+    await pipeline.ingest(msg('111', '#status'));
+    await new Promise((r) => setTimeout(r, 40));
+    expect(sent).toHaveLength(0);
+  });
+
+  it('@机器人 后照样能用', async () => {
+    const { pipeline, sent } = makePipeline(['999']);
+    await pipeline.ingest(msg('999', '@2959515696 #status'));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(sent.join()).toContain('PASC');
   });
 });

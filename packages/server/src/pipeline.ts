@@ -64,6 +64,8 @@ export interface PipelineDeps {
   stats: Stats;
   logger: Logger;
   emit: (event: PipelineEvent) => void;
+  /** 供 #status 命令使用：读本地真实状态，不经过大模型 */
+  statusReport?: (topic?: string) => Promise<string>;
   /** 动作执行流水（可选，落盘供前端展示） */
   executions?: { append: (record: import('@pasc/core').ExecutionRecord) => Promise<void> };
   now?: () => number;
@@ -121,7 +123,8 @@ export class Pipeline {
 
     msg.seq = pool.nextSeq();
 
-    // 开发模式命令：只认管理员，且在入库/过滤之前处理
+    // 管理员命令：都不入库、不进消息池
+    if (this.handleStatusCommand(msg, cfg)) return;
     if (this.handleDevCommand(msg, cfg)) return;
 
     // 图片先转成文字再入库：DeepSeek 没有视觉能力，识图必须在本地做掉
@@ -347,6 +350,15 @@ export class Pipeline {
       });
 
       stats.recordPrompt(bundle.chars, bundle.estimatedTokens);
+      // 单条命令要能自证"人格确实被跳过了"，否则只能靠回复语气猜
+      if (ctx.devModeOnce) {
+        logger.info('单条模式 Prompt', {
+          sceneKey,
+          sections: bundle.sections,
+          chars: bundle.chars,
+          personaIncluded: bundle.sections.includes('persona'),
+        });
+      }
       emit({
         type: 'prompt',
         ts: this.now(),
@@ -418,6 +430,33 @@ export class Pipeline {
       default:
         return execution.action;
     }
+  }
+
+  /**
+   * #status 命令：读本地真实状态回报，不经过大模型。
+   *   #status              全部
+   *   #status napcat       只看某一项
+   */
+  private handleStatusCommand(msg: ChatMessage, cfg: PascConfig): boolean {
+    const text = msg.text.replace(/^\s*(?:@\S+\s+)+/, '').trim();
+    if (!/^#status(?:\s|$)/i.test(text)) return false;
+    if (!cfg.behavior.admins.includes(msg.senderId)) {
+      this.deps.logger.warn('非管理员尝试使用 #status', { sender: msg.senderId });
+      return false;
+    }
+
+    const topic = text.replace(/^#status\s*/i, '').trim();
+    const { napcat, emit } = this.deps;
+    void (async () => {
+      try {
+        const report = (await this.deps.statusReport?.(topic)) ?? '(没有可用的状态来源)';
+        await napcat.sendText(msg.scene, report.slice(0, 1500));
+        emit({ type: 'dev', ts: this.now(), data: { sceneKey: msg.sceneKey, action: `status ${topic}`.trim() } });
+      } catch (err) {
+        void napcat.sendText(msg.scene, `状态读取失败：${err instanceof Error ? err.message : String(err)}`).catch(() => undefined);
+      }
+    })();
+    return true;
   }
 
   /** 当前会话是否处于开发模式（过期即失效） */
