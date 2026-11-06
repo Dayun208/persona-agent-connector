@@ -203,6 +203,11 @@ export class Runtime {
       selfId: cfg.napcat.selfId,
       logger: this.logger.child('napcat'),
     });
+    this.napcatClient.on('poke', (event) => {
+      void this.pipeline.onPoke(event).catch((err: unknown) => {
+        this.logger.warn('戳一戳处理失败', { error: err instanceof Error ? err.message : String(err) });
+      });
+    });
     this.napcatClient.on('message', (msg) => {
       void this.pipeline.ingest(msg).catch((err) => this.logError('ingest', err));
     });
@@ -357,6 +362,11 @@ export class Runtime {
       config: next.napcat,
       selfId: next.napcat.selfId,
       logger: this.logger.child('napcat'),
+    });
+    this.napcatClient.on('poke', (event) => {
+      void this.pipeline.onPoke(event).catch((err: unknown) => {
+        this.logger.warn('戳一戳处理失败', { error: err instanceof Error ? err.message : String(err) });
+      });
     });
     this.napcatClient.on('message', (msg) => {
       void this.pipeline.ingest(msg).catch((err) => this.logError('ingest', err));

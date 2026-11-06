@@ -1,4 +1,4 @@
-import type { ChatMessage, Segment } from '@pasc/core';
+import type { ChatMessage, Scene, Segment } from '@pasc/core';
 import { sceneKeyOf } from '@pasc/core';
 
 /** OneBot v11 消息段 */
@@ -43,6 +43,40 @@ const CQ_ANY = /\[CQ:([a-zA-Z_]+),?([^\]]*)\]/g;
  * 把 NapCat/OneBot 事件归一化成 PASC 内部的 ChatMessage。
  * 不是消息事件就返回 undefined。
  */
+export interface PokeEvent {
+  /** 戳人的人 */
+  operatorId: string;
+  /** 被戳的人 */
+  targetId: string;
+  scene: Scene;
+  timestamp: number;
+}
+
+/**
+ * 解析"戳一戳"通知。
+ * OneBot 11 里它是 notice + notify + poke，群聊和私聊的字段位置还不一样：
+ *   群：group_id + user_id（戳人的人）+ target_id（被戳的人）
+ *   私聊：user_id（戳人的人）+ target_id
+ */
+export function parsePokeEvent(event: OneBotEvent): PokeEvent | undefined {
+  const e = event as unknown as Record<string, unknown>;
+  if (e['post_type'] !== 'notice') return undefined;
+  if (e['notice_type'] !== 'notify') return undefined;
+  if (e['sub_type'] !== 'poke') return undefined;
+
+  const groupId = e['group_id'];
+  const operatorId = String(e['user_id'] ?? '');
+  const targetId = String(e['target_id'] ?? '');
+  if (!operatorId || !targetId) return undefined;
+
+  const scene: Scene = groupId !== undefined && groupId !== null && String(groupId) !== ''
+    ? { kind: 'group', groupId: String(groupId) }
+    : { kind: 'private', userId: operatorId };
+
+  const time = typeof e['time'] === 'number' ? e['time'] : Math.floor(Date.now() / 1000);
+  return { operatorId, targetId, scene, timestamp: time * 1000 };
+}
+
 export function parseOneBotEvent(event: OneBotEvent, opts: ParseOptions = {}): ChatMessage | undefined {
   const postType = event.post_type;
   if (postType !== 'message' && postType !== 'message_sent') return undefined;

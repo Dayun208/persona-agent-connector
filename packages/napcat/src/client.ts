@@ -1,12 +1,14 @@
 import { EventEmitter } from 'node:events';
 import type { ChatMessage, Logger, NapCatConfig, Scene, Segment } from '@pasc/core';
-import { parseOneBotEvent, type OneBotEvent } from './parse.js';
+import { parseOneBotEvent, parsePokeEvent, type OneBotEvent, type PokeEvent } from './parse.js';
 import { HttpTransport } from './http.js';
 import { WsTransport, type NapCatStatus } from './ws.js';
 
 /** 事件名 → 参数元组(Node EventEmitter 泛型要求) */
 export interface NapCatEvents {
   message: [msg: ChatMessage];
+  /** 有人戳了一戳（含戳的是不是机器人，由上层判断） */
+  poke: [event: PokeEvent];
   status: [status: NapCatStatus];
   error: [error: Error];
   /** 原始事件, 调试用 */
@@ -95,6 +97,8 @@ export class NapCatClient extends EventEmitter<NapCatEvents> {
       this.learnedSelfId = String(event.self_id);
     }
     this.emit('raw', event);
+    const poke = parsePokeEvent(event);
+    if (poke) this.emit('poke', poke);
     const msg = parseOneBotEvent(event, { selfId: this.learnedSelfId });
     if (msg) {
       // seq 由消息池统一分配, 这里先占位

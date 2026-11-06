@@ -366,6 +366,10 @@ const PipelineConfigSchema = z
     userBlacklist: z.array(z.string()).default([]),
     /** 是否处理私聊 */
     handlePrivate: z.boolean().default(true),
+    /** 被戳一戳时立刻跑一次判断（不受 judgeEveryN 节流影响） */
+    replyToPoke: z.boolean().default(true),
+    /** 同一会话里两次戳触发的间隔，避免被连戳刷屏 */
+    pokeCooldownMs: z.number().int().min(0).default(30_000),
   })
   .default({});
 

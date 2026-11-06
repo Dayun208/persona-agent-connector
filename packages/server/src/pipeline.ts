@@ -19,9 +19,11 @@ import {
   shouldRunJudge,
   understandImage,
   renderImageNote,
+  sceneKeyOf,
   splitForHumanStyle,
   stripBlockedCommands,
   sceneLabel,
+  type Scene,
   type Execution,
   type ParsedAgentOutput,
   type PascConfig,
@@ -212,6 +214,86 @@ export class Pipeline {
   }
 
   /** 仅跑判断, 不回复(供控制台"试判断") */
+  /** 上次因戳一戳触发回复的时间：sceneKey → 时间戳 */
+  private readonly pokeAt = new Map<string, number>();
+
+  /**
+   * 收到"戳一戳"时的处理：立刻跑一次判断模型（不受 judgeEveryN 节流），
+   * 判断说该理才回复。只处理"戳的是机器人自己"的情况。
+   */
+  async onPoke(event: { operatorId: string; targetId: string; scene: Scene; timestamp: number }): Promise<void> {
+    const cfg = this.deps.getConfig();
+    const { napcat, logger, pool, emit } = this.deps;
+
+    if (!cfg.pipeline.replyToPoke) return;
+    const selfId = napcat.selfId || cfg.napcat.selfId;
+    if (!selfId || event.targetId !== selfId) return;
+    // 自己戳自己（比如脚本测试、或动作回执）不算互动，否则可能自激
+    if (event.operatorId === selfId) return;
+    if (event.scene.kind === 'private' && !cfg.pipeline.handlePrivate) return;
+    if (event.scene.kind === 'group' && cfg.pipeline.groupWhitelist.length > 0
+      && !cfg.pipeline.groupWhitelist.includes(event.scene.groupId)) return;
+    if (cfg.pipeline.userBlacklist.includes(event.operatorId)) return;
+
+    const sceneKey = sceneKeyOf(event.scene);
+    // 冷却：被连戳时不要连回
+    const last = this.pokeAt.get(sceneKey) ?? 0;
+    if (this.now() - last < cfg.pipeline.pokeCooldownMs) {
+      logger.debug('戳一戳触发被冷却', { sceneKey, operatorId: event.operatorId });
+      return;
+    }
+    this.pokeAt.set(sceneKey, this.now());
+
+    const pokeTriggerBasis = {
+      id: `poke-${event.timestamp}`,
+      sceneKey,
+      scene: event.scene,
+      senderId: event.operatorId,
+      senderName: event.operatorId,
+      text: '（对方戳了戳你）',
+      atTargets: [],
+      segments: [],
+      mentionsSelf: true,
+      timestamp: event.timestamp,
+      isSelf: false,
+      seq: 0,
+    } as ChatMessage;
+    const member = this.recentMembers(sceneKey, pokeTriggerBasis).find((m) => m.id === event.operatorId);
+    const trigger: ChatMessage = {
+      id: `poke-${event.timestamp}-${event.operatorId}`,
+      sceneKey,
+      scene: event.scene,
+      senderId: event.operatorId,
+      senderName: member?.name || event.operatorId,
+      // 让模型知道发生了什么，而不是凭空冒出一句话
+      text: '（对方戳了戳你）',
+      timestamp: event.timestamp,
+      seq: pool.nextSeq(),
+      isSelf: false,
+      mentionsSelf: true,
+      atTargets: [],
+      segments: [],
+    };
+
+    logger.info('收到戳一戳，开始判断', { sceneKey, operatorId: event.operatorId });
+    emit({ type: 'message', ts: this.now(), data: { sceneKey, poke: true, senderId: event.operatorId } });
+
+    let decision: JudgeDecision;
+    try {
+      decision = await this.judgeOnly(trigger);
+    } catch (err) {
+      logger.warn('戳一戳判断失败', { error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    emit({ type: 'judge', ts: this.now(), data: { sceneKey, poke: true, ...decision } });
+
+    if (!decision.shouldReply) {
+      logger.info('戳一戳判断为不回复', { sceneKey, reason: decision.reason });
+      return;
+    }
+    await this.runReply({ trigger, reason: 'manual', decision });
+  }
+
   async judgeOnly(msg: ChatMessage): Promise<JudgeDecision> {
     const { judge, personas, pool } = this.deps;
     const cfg = this.deps.getConfig();
