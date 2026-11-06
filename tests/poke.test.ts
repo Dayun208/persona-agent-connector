@@ -37,13 +37,15 @@ function makePipeline(overrides: Record<string, unknown> = {}) {
   const cfg = normalizeConfig({ ...overrides });
   const judged: unknown[] = [];
   const replies: string[] = [];
+  const archived: unknown[] = [];
+  const pooled: unknown[] = [];
   const deps = {
     getConfig: () => cfg,
     napcat: { sendText: async () => {}, selfId: '999' },
     getAgent: () => ({ send: async () => ({ text: '{"message":"好啊"}', latencyMs: 1 }) }),
     pool: {
-      nextSeq: () => 1, push() {}, before: () => [], history: () => [], state: () => ({ lastReplyAt: 0 }),
-      size: () => 0, markReplied() {}, markJudged() {},
+      nextSeq: () => 1, push: (m: unknown) => { pooled.push(m); }, before: () => [], history: () => [],
+      state: () => ({ lastReplyAt: 0 }), size: () => 0, markReplied() {}, markJudged() {},
     },
     builder: { build: () => ({ system: '', user: '', total: 0, chars: 0, sections: [], estimatedTokens: 0 }) },
     judge: {
@@ -51,7 +53,7 @@ function makePipeline(overrides: Record<string, unknown> = {}) {
       passesThreshold: () => true,
     },
     guard: { check: () => ({ ok: false, reason: 'x' }), describeForPrompt: () => '' },
-    archive: { append() {} },
+    archive: { append: (m: unknown) => { archived.push(m); } },
     personas: { getActive: () => undefined, summary: () => '' },
     samples: { pick: () => [] },
     memorySearch: async () => [],
@@ -59,7 +61,7 @@ function makePipeline(overrides: Record<string, unknown> = {}) {
     logger: { info() {}, warn() {}, debug() {}, error() {} },
     emit: () => {},
   } as never;
-  return { pipeline: new Pipeline(deps), judged, replies };
+  return { pipeline: new Pipeline(deps), judged, replies, archived, pooled };
 }
 
 const poke = (target = '999', operator = '10001') => ({
@@ -73,6 +75,14 @@ describe('Pipeline.onPoke', () => {
     await pipeline.onPoke(poke());
     expect(judged).toHaveLength(1);
     expect((judged[0] as { trigger: { text: string } }).trigger.text).toContain('戳');
+  });
+
+  it('戳一戳也走完整管线：入库 + 进池', async () => {
+    const { pipeline, archived, pooled } = makePipeline();
+    await pipeline.onPoke(poke());
+    expect(archived.length).toBeGreaterThanOrEqual(1);
+    expect(pooled.length).toBeGreaterThanOrEqual(1);
+    expect((archived[0] as { text: string }).text).toContain('戳');
   });
 
   it('戳的不是机器人 → 不判断', async () => {

@@ -125,7 +125,7 @@ export class Pipeline {
   }
 
   /** 消息入口(NapCat 事件或 /api/simulate) */
-  async ingest(msg: ChatMessage, opts: { force?: boolean; trigger?: TriggerReason } = {}): Promise<void> {
+  async ingest(msg: ChatMessage, opts: { force?: boolean; trigger?: TriggerReason; judgeFirst?: boolean } = {}): Promise<void> {
     const cfg = this.deps.getConfig();
     const { pool, stats, archive, logger, emit } = this.deps;
 
@@ -149,6 +149,26 @@ export class Pipeline {
     }
 
     pool.push(msg);
+
+    // 先判断再决定：戳一戳走这条 —— 仍然过完整管线（入库、进池、过滤、排队），
+    // 只是不受 judgeEveryN 节流，每次都要判断
+    if (opts.judgeFirst) {
+      let decision: JudgeDecision | undefined;
+      try {
+        decision = await this.judgeOnly(msg);
+      } catch (err) {
+        logger.warn('judgeFirst 判断失败', { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      emit({ type: 'judge', ts: this.now(), data: { sceneKey: msg.sceneKey, ...(opts.trigger ? { poke: opts.trigger === 'poke' } : {}), ...decision } });
+      if (!decision.shouldReply) {
+        logger.info('判断为不回复', { sceneKey: msg.sceneKey, reason: decision.reason });
+        return;
+      }
+      stats.directTriggers += 1;
+      await this.enqueue(msg.sceneKey, () => this.runReply({ trigger: msg, reason: opts.trigger ?? 'judge', decision }));
+      return;
+    }
     emit({
       type: 'message',
       ts: this.now(),
@@ -223,20 +243,14 @@ export class Pipeline {
    */
   async onPoke(event: { operatorId: string; targetId: string; scene: Scene; timestamp: number }): Promise<void> {
     const cfg = this.deps.getConfig();
-    const { napcat, logger, pool, emit } = this.deps;
+    const { napcat, logger, pool } = this.deps;
 
     if (!cfg.pipeline.replyToPoke) return;
     const selfId = napcat.selfId || cfg.napcat.selfId;
     if (!selfId || event.targetId !== selfId) return;
-    // 自己戳自己（比如脚本测试、或动作回执）不算互动，否则可能自激
     if (event.operatorId === selfId) return;
-    if (event.scene.kind === 'private' && !cfg.pipeline.handlePrivate) return;
-    if (event.scene.kind === 'group' && cfg.pipeline.groupWhitelist.length > 0
-      && !cfg.pipeline.groupWhitelist.includes(event.scene.groupId)) return;
-    if (cfg.pipeline.userBlacklist.includes(event.operatorId)) return;
 
     const sceneKey = sceneKeyOf(event.scene);
-    // 冷却：被连戳时不要连回
     const last = this.pokeAt.get(sceneKey) ?? 0;
     if (this.now() - last < cfg.pipeline.pokeCooldownMs) {
       logger.debug('戳一戳触发被冷却', { sceneKey, operatorId: event.operatorId });
@@ -244,7 +258,7 @@ export class Pipeline {
     }
     this.pokeAt.set(sceneKey, this.now());
 
-    const pokeTriggerBasis = {
+    const member = this.recentMembers(sceneKey, {
       id: `poke-${event.timestamp}`,
       sceneKey,
       scene: event.scene,
@@ -253,47 +267,32 @@ export class Pipeline {
       text: '（对方戳了戳你）',
       atTargets: [],
       segments: [],
-      mentionsSelf: true,
+      mentionsSelf: false,
       timestamp: event.timestamp,
       isSelf: false,
       seq: 0,
-    } as ChatMessage;
-    const member = this.recentMembers(sceneKey, pokeTriggerBasis).find((m) => m.id === event.operatorId);
+    } as ChatMessage).find((m) => m.id === event.operatorId);
+
     const trigger: ChatMessage = {
       id: `poke-${event.timestamp}-${event.operatorId}`,
       sceneKey,
       scene: event.scene,
       senderId: event.operatorId,
       senderName: member?.name || event.operatorId,
-      // 让模型知道发生了什么，而不是凭空冒出一句话
       text: '（对方戳了戳你）',
       timestamp: event.timestamp,
       seq: pool.nextSeq(),
       isSelf: false,
-      // 别伪装成 @：判断模型会把它读成"消息 @ 了我"，日志里看不出是戳
       mentionsSelf: false,
       atTargets: [],
       segments: [],
     };
 
-    logger.info('收到戳一戳，开始判断', { sceneKey, operatorId: event.operatorId });
-    emit({ type: 'message', ts: this.now(), data: { sceneKey, poke: true, senderId: event.operatorId } });
-
-    let decision: JudgeDecision;
-    try {
-      decision = await this.judgeOnly(trigger);
-    } catch (err) {
-      logger.warn('戳一戳判断失败', { error: err instanceof Error ? err.message : String(err) });
-      return;
-    }
-    emit({ type: 'judge', ts: this.now(), data: { sceneKey, poke: true, ...decision } });
-
-    if (!decision.shouldReply) {
-      logger.info('戳一戳判断为不回复', { sceneKey, reason: decision.reason });
-      return;
-    }
-    await this.runReply({ trigger, reason: 'poke', decision });
+    logger.info('收到戳一戳，走管线判断', { sceneKey, operatorId: event.operatorId });
+    // 走完整管线：过滤、入库、进池、按场景排队；judgeFirst 让它每次都判断
+    await this.ingest(trigger, { judgeFirst: true, trigger: 'poke' });
   }
+
 
   async judgeOnly(msg: ChatMessage): Promise<JudgeDecision> {
     const { judge, personas, pool } = this.deps;
