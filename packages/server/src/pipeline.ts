@@ -430,7 +430,7 @@ export class Pipeline {
         }
         const info = await napcat.getImage(img.file);
         if (!info?.file) {
-          logger.warn('get_image 没拿到容器路径（NapCat 可能正在重连）', { file: img.file });
+          logger.warn('get_image 失败，图片无法附上', { file: img.file, error: info?.error ?? '未知' });
           continue;
         }
         try {

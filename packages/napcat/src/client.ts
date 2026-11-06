@@ -197,14 +197,25 @@ export class NapCatClient extends EventEmitter<NapCatEvents> {
     return this.call('friend_poke', { user_id: userId });
   }
 
-  /** 取图片在容器里的真实路径（NapCat 会把收到的图缓存下来） */
-  async getImage(file: string): Promise<{ file?: string; url?: string } | undefined> {
-    try {
-      const raw = (await this.call('get_image', { file })) as { data?: { file?: string; url?: string } };
-      return raw?.data;
-    } catch {
-      return undefined;
+  /**
+   * 取图片在容器里的真实路径。
+   *
+   * 刚收到的图 NapCat 不一定马上缓存好，第一次调 get_image 可能直接返回错误；
+   * 隔几百毫秒重试通常就有了。所以这里做 3 次退避重试，并把最后一次的错误带出来。
+   */
+  async getImage(file: string): Promise<{ file?: string; url?: string; error?: string } | undefined> {
+    let lastError = '';
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const raw = (await this.call('get_image', { file })) as { data?: { file?: string; url?: string } };
+        if (raw?.data?.file) return raw.data;
+        lastError = '返回里没有 file 字段';
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 250 * attempt));
     }
+    return { error: lastError };
   }
 
   /** 好友列表（用于设置页选择管理员） */
