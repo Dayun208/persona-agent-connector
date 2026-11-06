@@ -326,6 +326,15 @@ const DistillConfigSchema = z
   })
   .default({});
 
+const DevModeConfigSchema = z
+  .object({
+    /** 不写命令时默认开多久（毫秒），到期自动恢复人格 */
+    ttlMs: z.number().int().positive().default(30 * 60_000),
+    /** 触发命令前缀 */
+    prefix: z.string().default('#dev'),
+  })
+  .default({});
+
 const PipelineConfigSchema = z
   .object({
     /** mention = 只回应 @; auto = 只靠判断模型; both = 两者并行 */
@@ -352,6 +361,7 @@ export const PascConfigSchema = z
     napcat: NapCatConfigSchema,
     openclaw: AgentConfigSchema,
     vision: VisionConfigSchema,
+    devMode: DevModeConfigSchema,
     judgeModel: JudgeConfigSchema,
     embedding: EmbeddingConfigSchema,
     memory: MemoryConfigSchema,
@@ -370,6 +380,7 @@ export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export type NapCatConfig = z.infer<typeof NapCatConfigSchema>;
 export type JudgeConfig = z.infer<typeof JudgeConfigSchema>;
 export type VisionConfig = z.infer<typeof VisionConfigSchema>;
+export type DevModeConfig = z.infer<typeof DevModeConfigSchema>;
 export type BehaviorConfig = z.infer<typeof BehaviorConfigSchema>;
 export type PipelineConfig = z.infer<typeof PipelineConfigSchema>;
 export type ExtractionConfig = z.infer<typeof ExtractionConfigSchema>;

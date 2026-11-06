@@ -33,6 +33,7 @@ import { readFile, readdir } from 'node:fs/promises';
 
 export type PipelineEventType =
   | 'message'
+  | 'dev'
   | 'judge'
   | 'prompt'
   | 'reply'
@@ -98,6 +99,8 @@ export class Pipeline {
   private readonly imageNotes = new Map<string, string>();
   /** 待附给 Agent 的图片（处理完即清空） */
   private readonly pendingAttachments: AgentAttachment[] = [];
+  /** 开发模式：sceneKey → 到期时间戳。到期自动恢复人格 */
+  private readonly devModeUntil = new Map<string, number>();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -115,6 +118,10 @@ export class Pipeline {
     const { pool, stats, archive, logger, emit } = this.deps;
 
     msg.seq = pool.nextSeq();
+
+    // 开发模式命令：只认管理员，且在入库/过滤之前处理
+    if (this.handleDevCommand(msg, cfg)) return;
+
     // 图片先转成文字再入库：DeepSeek 没有视觉能力，识图必须在本地做掉
     if (cfg.vision.enabled) await this.enrichImages(msg, cfg);
     archive.append(msg);
@@ -229,6 +236,7 @@ export class Pipeline {
       members: this.recentMembers(msg.sceneKey, msg),
       webSearch: cfg.openclaw.webSearch,
       vision: cfg.vision.enabled,
+      devMode: this.isDevMode(msg.sceneKey),
       secondsSinceLastReply: this.secondsSinceLastReply(msg.sceneKey),
     });
   }
@@ -331,6 +339,7 @@ export class Pipeline {
         members: this.recentMembers(sceneKey, trigger),
         webSearch: cfg.openclaw.webSearch,
         vision: cfg.vision.enabled,
+        devMode: this.isDevMode(sceneKey),
         ...(ctx.matchedKeyword ? { matchedKeyword: ctx.matchedKeyword } : {}),
         secondsSinceLastReply: this.secondsSinceLastReply(sceneKey),
       });
@@ -407,6 +416,71 @@ export class Pipeline {
       default:
         return execution.action;
     }
+  }
+
+  /** 当前会话是否处于开发模式（过期即失效） */
+  isDevMode(sceneKey: string): boolean {
+    const until = this.devModeUntil.get(sceneKey);
+    if (!until) return false;
+    if (Date.now() >= until) {
+      this.devModeUntil.delete(sceneKey);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * 开发模式命令：管理员在当前会话里临时关掉人格注入，方便调参。
+   *   #dev on / #dev off / #dev（看状态与关键参数）
+   * 到期自动恢复，避免忘了关。
+   */
+  private handleDevCommand(msg: ChatMessage, cfg: PascConfig): boolean {
+    const prefix = (cfg.devMode?.prefix || '#dev').trim();
+    const text = msg.text.trim();
+    if (!text.startsWith(prefix)) return false;
+
+    const { napcat, logger, emit } = this.deps;
+    const sub = text.slice(prefix.length).trim().toLowerCase();
+    const ttl = cfg.devMode?.ttlMs ?? 30 * 60_000;
+    const sceneKey = msg.sceneKey;
+
+    if (!cfg.behavior.admins.includes(msg.senderId)) {
+      logger.warn('非管理员尝试使用开发模式命令', { sender: msg.senderId, sceneKey });
+      return false;
+    }
+
+    const reply = (body: string): void => {
+      void napcat.sendText(msg.scene, body).catch(() => undefined);
+      emit({ type: 'dev', ts: this.now(), data: { sceneKey, action: sub || 'status' } });
+    };
+
+    if (sub === 'on' || sub === '开') {
+      const until = Date.now() + ttl;
+      this.devModeUntil.set(sceneKey, until);
+      logger.info('开发模式开启', { sceneKey, by: msg.senderId, until });
+      reply(`开发模式已开（${Math.round(ttl / 60000)} 分钟）\n人格/样本/记忆暂停注入，只保留基础约束与 JSON 协议。到期自动恢复。`);
+      return true;
+    }
+
+    if (sub === 'off' || sub === '关') {
+      this.devModeUntil.delete(sceneKey);
+      logger.info('开发模式关闭', { sceneKey, by: msg.senderId });
+      reply('开发模式已关，人格恢复。');
+      return true;
+    }
+
+    const on = this.isDevMode(sceneKey);
+    const until = this.devModeUntil.get(sceneKey);
+    const left = until ? Math.max(0, Math.round((until - Date.now()) / 60000)) : 0;
+    reply([
+      `开发模式：${on ? `开（剩 ${left} 分钟）` : '关'}`,
+      `人格：${on ? '暂停注入' : '正常注入'}`,
+      `判断：阈值 ${cfg.judgeModel.replyThreshold} / 每 ${cfg.judgeModel.judgeEveryN} 条 / 冷却 ${Math.round(cfg.judgeModel.replyCooldownMs / 1000)}s`,
+      `注入：人格${cfg.prompt.inject.persona ? '✓' : '✗'} 样本${cfg.prompt.inject.samples ? '✓' : '✗'} 记忆${cfg.prompt.inject.memory ? '✓' : '✗'} 历史${cfg.prompt.inject.history ? '✓' : '✗'}`,
+      `联网：${cfg.openclaw.webSearch ? '开' : '关'}　识图：${cfg.vision.enabled ? cfg.vision.mode : '关'}`,
+      `用法：${prefix} on / ${prefix} off`,
+    ].join('\n'));
+    return true;
   }
 
   /**

@@ -25,6 +25,8 @@ export interface PromptBuildContext {
   webSearch?: boolean;
   /** 是否启用了识图（由 vision.enabled 控制） */
   vision?: boolean;
+  /** 开发模式：这个人格在当前会话被临时停用，只保留基础约束与协议 */
+  devMode?: boolean;
   /** 本会话最近出现的成员（供模型把昵称映射成 QQ 号） */
   members?: Array<{ id: string; name: string }>;
   /** 触发关键词(便于模型知道自己为什么被叫) */
@@ -97,7 +99,7 @@ export class PromptBuilder {
       blocks.push({ id: 'base', text: cfg.base.trim() + searchHint + imageHint, priority: 90 });
     }
 
-    if (inject.persona && ctx.persona?.content.trim()) {
+    if (inject.persona && !ctx.devMode && ctx.persona?.content.trim()) {
       blocks.push({
         id: 'persona',
         text: [
@@ -111,7 +113,7 @@ export class PromptBuilder {
       });
     }
 
-    if (inject.samples) {
+    if (inject.samples && !ctx.devMode) {
       const samples = ctx.samples ?? [];
       if (samples.length > 0) {
         const lines = samples.map((s, i) => `### 示例 ${i + 1}\n有人: ${s.question}\n你: ${s.answer}`);
@@ -123,7 +125,7 @@ export class PromptBuilder {
       }
     }
 
-    if (inject.memory && ctx.memories && ctx.memories.length > 0) {
+    if (inject.memory && !ctx.devMode && ctx.memories && ctx.memories.length > 0) {
       const lines = ctx.memories.map((m) => `- ${m.text}`);
       blocks.push({
         id: 'memory',
