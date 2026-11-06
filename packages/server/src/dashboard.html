@@ -222,6 +222,7 @@
   select.input { cursor: pointer; }
   .field { display: flex; flex-direction: column; gap: 5px; }
   .field > label { font-size: 12px; color: var(--muted); }
+  .row { display: flex; align-items: center; gap: 8px; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
   .section-title {
@@ -372,6 +373,12 @@
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid-2 { grid-template-columns: 1fr; }
   }
+  .gchip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--bg-soft); color: var(--muted); border: 1px solid var(--line); }
+  .gsec { margin-top: 14px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); opacity: .8; }
+  .grel { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; color: var(--text); }
+  .grel b { font-weight: 600; color: var(--accent); }
+  .gmem { margin-top: 6px; padding: 7px 9px; border-radius: 8px; background: var(--bg-soft); font-size: 12px; line-height: 1.55; color: var(--text); opacity: .9; }
+  .gdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 </style>
 </head>
 <body>
@@ -541,31 +548,43 @@
 
     <!-- ============ 提纯 ============ -->
     <section class="panel" id="view-graph">
-      <div class="grid-2" style="grid-template-columns: 1fr 300px;">
+      <div class="grid-2" style="grid-template-columns: 1fr 320px;">
         <div class="col">
-          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:10px;">
-            <div class="row" style="justify-content:space-between; align-items:center; gap:12px;">
-              <div class="row" style="gap:10px; align-items:baseline;">
-                <h3 style="margin:0;">记忆图谱</h3>
-                <span class="muted" id="graph-summary" style="font-size:12px;">—</span>
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:12px;">
+            <div class="row" style="justify-content:space-between; align-items:center; gap:12px; flex-wrap:nowrap;">
+              <div class="row" style="gap:8px; align-items:center; min-width:0; flex-wrap:nowrap;">
+                <h3 style="margin:0; white-space:nowrap;">记忆图谱</h3>
+                <span class="gchip" id="graph-count-node">0 实体</span>
+                <span class="gchip" id="graph-count-edge">0 关系</span>
               </div>
-              <div class="row" style="gap:8px;">
+              <div class="row" style="gap:8px; flex-shrink:0;">
+                <button class="btn ghost" id="btn-graph-reset" title="重置视角">重置视角</button>
                 <button class="btn ghost" id="btn-graph-reload">刷新</button>
                 <button class="btn" id="btn-graph-rebuild">重建</button>
               </div>
             </div>
-            <div style="flex:1; min-height:420px; position:relative; border-radius:12px; overflow:hidden; background:var(--bg-soft);">
-              <canvas id="graph-canvas" style="width:100%; height:100%; display:block;"></canvas>
-              <div id="graph-empty" class="muted" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center; font-size:13px;">
-                还没有图谱数据 —— 先积累一些记忆，或点右上角「重建」
+            <div style="flex:1; min-height:440px; position:relative; border-radius:14px; overflow:hidden;
+                        background:radial-gradient(circle at 50% 40%, var(--bg-soft), var(--bg)); border:1px solid var(--line);">
+              <canvas id="graph-canvas" style="width:100%; height:100%; display:block; cursor:grab;"></canvas>
+              <div id="graph-empty" style="position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+                          flex-direction:column; gap:8px; color:var(--muted); font-size:13px;">
+                <div style="font-size:22px; opacity:.5;">❖</div>
+                <div>还没有图谱数据</div>
+                <div style="font-size:12px; opacity:.7;">先积累一些记忆，或点右上角「重建」</div>
+              </div>
+              <div id="graph-legend" style="position:absolute; left:14px; bottom:12px; display:flex; gap:12px;
+                          font-size:11px; color:var(--muted); background:color-mix(in srgb, var(--bg) 82%, transparent);
+                          padding:6px 10px; border-radius:999px; backdrop-filter:blur(6px);"></div>
+              <div id="graph-hint" style="position:absolute; right:14px; bottom:12px; font-size:11px; color:var(--muted); opacity:.75;">
+                滚轮缩放 · 拖拽平移 · 点击节点
               </div>
             </div>
           </div>
         </div>
         <div class="col">
           <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column; gap:10px;">
-            <h3>节点详情</h3>
-            <div id="graph-detail" class="muted" style="font-size:13px; line-height:1.7;">点左边任意节点查看</div>
+            <h3 style="margin:0;">节点详情</h3>
+            <div id="graph-detail" style="font-size:13px; line-height:1.7; color:var(--muted);">点左边任意节点查看</div>
           </div>
         </div>
       </div>
@@ -772,45 +791,108 @@ function currentView() {
 }
 
 // ---------------- 记忆图谱 ----------------
+const TYPE_LABEL = { person: '人', place: '地点', org: '组织', topic: '事物' };
 const graphState = {
-  nodes: [], edges: [], loaded: false, selected: null, screen: new Map(),
-  raf: 0, size: { w: 0, h: 0 }, dpr: 1,
+  nodes: [], edges: [], selected: null, hover: null,
+  view: { scale: 1, tx: 0, ty: 0 },
+  settled: false,
+  drag: null, raf: 0, alpha: 1, screen: new Map(),
+  memories: null,
 };
 
-async function loadGraph(force) {
+function gEsc(text) {
+  return String(text ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+async function loadGraph() {
   const canvas = $('#graph-canvas');
   if (!canvas) return;
   try {
     const g = await api('/api/graph');
-    graphState.nodes = (g.nodes || []).map((n) => ({ ...n, x: 0, y: 0, vx: 0, vy: 0 }));
+    const prev = new Map(graphState.nodes.map((n) => [n.id, n]));
+    graphState.nodes = (g.nodes || []).map((n, i, arr) => {
+      const old = prev.get(n.id);
+      const angle = (i / Math.max(arr.length, 1)) * Math.PI * 2;
+      return {
+        ...n,
+        x: old ? old.x : Math.cos(angle) * 160 + (Math.random() - 0.5) * 30,
+        y: old ? old.y : Math.sin(angle) * 160 + (Math.random() - 0.5) * 30,
+        vx: 0, vy: 0,
+      };
+    });
     graphState.edges = g.edges || [];
-    graphState.loaded = true;
-    $('#graph-summary').textContent = `${graphState.nodes.length} 个实体 · ${graphState.edges.length} 条关系`;
+    graphState.selected = null;
+    $('#graph-count-node').textContent = `${graphState.nodes.length} 实体`;
+    $('#graph-count-edge').textContent = `${graphState.edges.length} 关系`;
     $('#graph-empty').style.display = graphState.nodes.length === 0 ? 'flex' : 'none';
-    layoutGraph(true);
+    if (graphState.nodes.length === 0) $('#graph-empty').style.display = 'flex';
+    renderGraphLegend();
+    fitGraphView();
+    graphState.alpha = 1;
+    graphState.settled = false;
     startGraphLoop();
-    if (force) renderGraphDetail(graphState.selected);
+    renderGraphDetail(null);
   } catch (err) {
-    $('#graph-summary').textContent = '加载失败';
+    $('#graph-count-node').textContent = '加载失败';
   }
 }
 
-// 初始位置：圆圈排布，避免所有点堆在原点
-function layoutGraph(reset) {
+function renderGraphLegend() {
+  const box = $('#graph-legend');
+  if (!box) return;
+  const colors = graphColors();
+  const types = [...new Set(graphState.nodes.map((n) => n.type))];
+  box.innerHTML = types.map((t) =>
+    `<span style="display:inline-flex; align-items:center; gap:5px;">
+       <i class="gdot" style="background:${t === 'person' ? colors.person : colors.topic}"></i>${TYPE_LABEL[t] || '实体'}
+     </span>`).join('');
+}
+
+function graphColors() {
+  const css = getComputedStyle(document.documentElement);
+  const get = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    text: get('--text', '#1a1a1a'),
+    muted: get('--muted', '#888'),
+    line: get('--line', '#ddd'),
+    accent: get('--accent', '#6c5ce7'),
+    bg: get('--bg', '#fff'),
+    bgSoft: get('--bg-soft', '#f5f5f7'),
+    person: get('--accent', '#6c5ce7'),
+    topic: get('--muted', '#999'),
+  };
+}
+
+function canvasRect() {
+  const canvas = $('#graph-canvas');
+  const host = canvas.parentElement;
+  return { canvas, host, rect: host.getBoundingClientRect() };
+}
+
+function fitGraphView() {
+  const { rect } = canvasRect();
   const { nodes } = graphState;
-  const n = nodes.length || 1;
-  nodes.forEach((node, i) => {
-    if (!reset && node.x) return;
-    const angle = (i / n) * Math.PI * 2;
-    node.x = Math.cos(angle) * 140 + (Math.random() - 0.5) * 40;
-    node.y = Math.sin(angle) * 140 + (Math.random() - 0.5) * 40;
-  });
+  if (nodes.length === 0) return;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
+    minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+  }
+  const spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
+  const scale = Math.min((rect.width * 0.74) / spanX, (rect.height * 0.74) / spanY, 2.6);
+  const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
+  graphState.view = { scale, tx: rect.width / 2 - midX * scale, ty: rect.height / 2 - midY * scale };
+}
+
+function worldToScreen(x, y) {
+  const { scale, tx, ty } = graphState.view;
+  return { x: x * scale + tx, y: y * scale + ty };
 }
 
 function stepGraph() {
   const { nodes, edges } = graphState;
+  if (graphState.alpha < 0.02) return;
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  // 斥力
   for (let i = 0; i < nodes.length; i += 1) {
     for (let j = i + 1; j < nodes.length; j += 1) {
       const a = nodes[i], b = nodes[j];
@@ -818,181 +900,300 @@ function stepGraph() {
       let d2 = dx * dx + dy * dy;
       if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
       const dist = Math.sqrt(d2);
-      const force = 14000 / d2;
-      const fx = (dx / dist) * force, fy = (dy / dist) * force;
-      a.vx += fx; a.vy += fy;
-      b.vx -= fx; b.vy -= fy;
+      const force = (9000 / d2) * graphState.alpha;
+      a.vx += (dx / dist) * force; a.vy += (dy / dist) * force;
+      b.vx -= (dx / dist) * force; b.vy -= (dy / dist) * force;
     }
   }
-  // 弹簧
   for (const e of edges) {
     const a = byId.get(e.from), b = byId.get(e.to);
     if (!a || !b) continue;
     const dx = b.x - a.x, dy = b.y - a.y;
     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    const target = 170;
-    const force = (dist - target) * 0.02;
-    const fx = (dx / dist) * force, fy = (dy / dist) * force;
-    a.vx += fx; a.vy += fy;
-    b.vx -= fx; b.vy -= fy;
+    const force = (dist - 170) * 0.012 * graphState.alpha;
+    a.vx += (dx / dist) * force; a.vy += (dy / dist) * force;
+    b.vx -= (dx / dist) * force; b.vy -= (dy / dist) * force;
   }
-  // 向心 + 阻尼
   for (const n of nodes) {
-    n.vx += -n.x * 0.0012;
-    n.vy += -n.y * 0.0012;
-    n.vx *= 0.85; n.vy *= 0.85;
+    n.vx += -n.x * 0.0025 * graphState.alpha;
+    n.vy += -n.y * 0.0025 * graphState.alpha;
+    n.vx *= 0.86; n.vy *= 0.86;
     n.x += n.vx; n.y += n.vy;
   }
+  graphState.alpha *= 0.985;
 }
 
 function startGraphLoop() {
   if (graphState.raf) return;
   const loop = () => {
     stepGraph();
+    // 物理稳定后重新取一次视野：节点散开后的包围盒才是最终结果
+    if (!graphState.settled && graphState.alpha < 0.05) {
+      graphState.settled = true;
+      fitGraphView();
+    }
     drawGraph();
     graphState.raf = requestAnimationFrame(loop);
   };
   graphState.raf = requestAnimationFrame(loop);
 }
 
-function graphThemeColors() {
-  const css = getComputedStyle(document.documentElement);
-  return {
-    text: css.getPropertyValue('--text').trim() || '#1a1a1a',
-    muted: css.getPropertyValue('--muted').trim() || '#888',
-    line: css.getPropertyValue('--line').trim() || '#ddd',
-    accent: css.getPropertyValue('--accent').trim() || '#6c5ce7',
-    panel: css.getPropertyValue('--bg-soft').trim() || '#f5f5f7',
-  };
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 function drawGraph() {
-  const canvas = $('#graph-canvas');
-  if (!canvas || !canvas.parentElement) return;
-  const rect = canvas.parentElement.getBoundingClientRect();
+  const { canvas, rect } = canvasRect();
+  if (!canvas || rect.width === 0) return;
   const dpr = window.devicePixelRatio || 1;
-  if (canvas.width !== Math.round(rect.width * dpr) || canvas.height !== Math.round(rect.height * dpr)) {
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
-  }
+  const w = Math.round(rect.width * dpr), h = Math.round(rect.height * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
   const ctx = canvas.getContext('2d');
-  const { width: w, height: h } = canvas;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  ctx.scale(dpr, dpr);
-  const c = graphThemeColors();
-  const { nodes, edges, selected } = graphState;
-  if (nodes.length === 0) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const { nodes, edges, selected, hover, view } = graphState;
+  if (nodes.length === 0) { graphState.screen.clear(); return; }
+  const c = graphColors();
   const byId = new Map(nodes.map((n) => [n.id, n]));
-
-  // 自动铺满画布：按当前包围盒缩放，免得节点挤在中间一小坨
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const n of nodes) {
-    minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
-    minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
+  const active = selected || hover;
+  const neighbors = new Set();
+  if (active) {
+    for (const e of edges) {
+      if (e.from === active) neighbors.add(e.to);
+      if (e.to === active) neighbors.add(e.from);
+    }
   }
-  const spanX = Math.max(maxX - minX, 1), spanY = Math.max(maxY - minY, 1);
-  const fit = Math.min(
-    (rect.width * 0.62) / spanX,
-    (rect.height * 0.62) / spanY,
-    2.2,
-  );
-  const midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
-  const cx = rect.width / 2, cy = rect.height / 2;
-  const px = (n) => cx + (n.x - midX) * fit;
-  const py = (n) => cy + (n.y - midY) * fit;
 
-  // 边
-  ctx.lineWidth = 1;
+  // 关系线：轻微弧度 + 标签
   for (const e of edges) {
     const a = byId.get(e.from), b = byId.get(e.to);
     if (!a || !b) continue;
-    const hot = selected && (e.from === selected || e.to === selected);
+    const pa = worldToScreen(a.x, a.y), pb = worldToScreen(b.x, b.y);
+    const hot = active && (e.from === active || e.to === active);
+    const dim = active && !hot;
+
+    // 控制点：中点向外偏移一点，避免多条线重叠成一条
+    const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+    const nx = -(pb.y - pa.y), ny = pb.x - pa.x;
+    const len = Math.hypot(nx, ny) || 1;
+    const bow = Math.min(18, 6 + e.weight * 3);
+    const cx = mx + (nx / len) * bow, cy = my + (ny / len) * bow;
+
+    ctx.save();
+    ctx.globalAlpha = dim ? 0.18 : (hot ? 0.95 : 0.4);
     ctx.strokeStyle = hot ? c.accent : c.line;
-    ctx.globalAlpha = hot ? 0.9 : 0.5;
+    ctx.lineWidth = hot ? 2 : 1.2;
     ctx.beginPath();
-    ctx.moveTo(px(a), py(a));
-    ctx.lineTo(px(b), py(b));
+    ctx.moveTo(pa.x, pa.y);
+    ctx.quadraticCurveTo(cx, cy, pb.x, pb.y);
     ctx.stroke();
-    // 关系不多时直接标出来，省得挨个点
-    if (hot || graphState.edges.length <= 12) {
-      ctx.globalAlpha = hot ? 0.9 : 0.45;
+
+    if (view.scale > 0.55 && (hot || graphState.edges.length <= 14)) {
+      const label = e.relation;
+      ctx.font = '11px system-ui, -apple-system, sans-serif';
+      const tw = ctx.measureText(label).width;
+      const lx = cx, ly = cy;
+      ctx.globalAlpha = dim ? 0.2 : (hot ? 1 : 0.72);
+      ctx.fillStyle = c.bg;
+      roundRect(ctx, lx - tw / 2 - 6, ly - 9, tw + 12, 18, 9);
+      ctx.fill();
       ctx.fillStyle = hot ? c.accent : c.muted;
-      ctx.font = '11px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      const mx = (px(a) + px(b)) / 2, my = (py(a) + py(b)) / 2;
-      ctx.fillText(e.relation, mx, my - 4);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, lx, ly);
+      ctx.textBaseline = 'alphabetic';
     }
+    ctx.restore();
   }
-  ctx.globalAlpha = 1;
 
   // 节点
   const maxMentions = Math.max(...nodes.map((n) => n.mentions), 1);
   for (const n of nodes) {
-    const r = 8 + (n.mentions / maxMentions) * 10;
+    const p = worldToScreen(n.x, n.y);
+    graphState.screen.set(n.id, p);
+    const r = (7 + Math.sqrt(n.mentions / maxMentions) * 9) * Math.min(1.5, Math.max(0.85, view.scale));
     const isSel = selected === n.id;
+    const isHover = hover === n.id;
+    const dim = active && !isSel && !isHover && !neighbors.has(n.id);
+    const color = n.type === 'person' ? c.person : c.topic;
+
+    ctx.save();
+    ctx.globalAlpha = dim ? 0.25 : 1;
+
+    if (isSel || isHover) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 6, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = dim ? 0.1 : 0.14;
+      ctx.fill();
+      ctx.globalAlpha = dim ? 0.25 : 1;
+    }
+
     ctx.beginPath();
-    ctx.arc(px(n), py(n), r, 0, Math.PI * 2);
-    ctx.fillStyle = isSel ? c.accent : (n.type === 'person' ? c.accent : c.muted);
-    ctx.globalAlpha = isSel ? 1 : (n.type === 'person' ? 0.85 : 0.55);
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(p.x - r * 0.3, p.y - r * 0.35, r * 0.2, p.x, p.y, r);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, n.type === 'person' ? color : c.topic);
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = dim ? 0.25 : (n.type === 'person' ? 0.95 : 0.6);
     ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = c.text;
-    ctx.font = `${isSel ? '600 ' : ''}12px system-ui, sans-serif`;
+
+    if (isSel) {
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = c.accent;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 标签：描一圈底色再写字，压在线上也看得清
+    ctx.globalAlpha = dim ? 0.25 : 1;
+    ctx.font = `${isSel || isHover ? '600 ' : ''}12px system-ui, -apple-system, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(n.name, px(n), py(n) + r + 13);
-    graphState.screen.set(n.id, { x: px(n), y: py(n) });
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = c.bg;
+    ctx.strokeText(n.name, p.x, p.y + r + 13);
+    ctx.fillStyle = isSel || isHover ? c.text : c.text;
+    ctx.fillText(n.name, p.x, p.y + r + 13);
+    ctx.restore();
   }
 }
 
-function renderGraphDetail(nodeId) {
+function pickNode(clientX, clientY) {
+  const { rect } = canvasRect();
+  const mx = clientX - rect.left, my = clientY - rect.top;
+  let best = null, bestD = Infinity;
+  for (const n of graphState.nodes) {
+    const p = graphState.screen.get(n.id);
+    if (!p) continue;
+    const d = Math.hypot(p.x - mx, p.y - my);
+    if (d < 30 && d < bestD) { best = n; bestD = d; }
+  }
+  return best;
+}
+
+async function loadMemoryTexts() {
+  if (graphState.memories) return graphState.memories;
+  try {
+    const r = await api('/api/memories?limit=500');
+    const map = new Map((r.items || []).map((m) => [m.id, m]));
+    graphState.memories = map;
+    return map;
+  } catch {
+    graphState.memories = new Map();
+    return graphState.memories;
+  }
+}
+
+async function renderGraphDetail(nodeId) {
   const box = $('#graph-detail');
   if (!box) return;
-  if (!nodeId) { box.textContent = '点左边任意节点查看'; return; }
+  if (!nodeId) {
+    box.style.color = 'var(--muted)';
+    box.textContent = '点左边任意节点查看';
+    return;
+  }
   const node = graphState.nodes.find((n) => n.id === nodeId);
   if (!node) { box.textContent = '节点不存在'; return; }
-  const edges = graphState.edges.filter((e) => e.from === nodeId || e.to === nodeId);
   const byId = new Map(graphState.nodes.map((n) => [n.id, n]));
-  const kind = { person: '人', place: '地点', org: '组织', topic: '事物' }[node.type] || '实体';
-  box.innerHTML = '';
-  const title = document.createElement('div');
-  title.innerHTML = `<strong>${escapeHtml(node.name)}</strong><br><span class="muted">${kind} · 提及 ${node.mentions} 次</span>`;
-  box.appendChild(title);
-  if (edges.length > 0) {
-    const list = document.createElement('div');
-    list.style.marginTop = '10px';
-    list.innerHTML = edges.map((e) => {
-      const other = byId.get(e.from === nodeId ? e.to : e.from);
-      const arrow = e.from === nodeId ? '→' : '←';
-      return `<div style="margin-top:6px;">${arrow} <strong>${escapeHtml(e.relation)}</strong> ${escapeHtml(other ? other.name : (e.from === nodeId ? e.to : e.from))}</div>`;
-    }).join('');
-    box.appendChild(list);
-  } else {
-    const none = document.createElement('div');
-    none.className = 'muted';
-    none.style.marginTop = '8px';
-    none.textContent = '暂无关联关系';
-    box.appendChild(none);
-  }
+  const edges = graphState.edges.filter((e) => e.from === nodeId || e.to === nodeId);
+  const memories = await loadMemoryTexts();
+
+  const relHtml = edges.length
+    ? edges.map((e) => {
+        const otherId = e.from === nodeId ? e.to : e.from;
+        const other = byId.get(otherId);
+        const arrow = e.from === nodeId ? '→' : '←';
+        return `<div class="grel">${arrow}<b>${gEsc(e.relation)}</b>${gEsc(other ? other.name : otherId)}</div>`;
+      }).join('')
+    : '<div class="grel" style="color:var(--muted)">暂无关联关系</div>';
+
+  const memIds = [...new Set(node.memoryIds || [])].slice(0, 6);
+  const memHtml = memIds
+    .map((id) => memories.get(id))
+    .filter(Boolean)
+    .map((m) => `<div class="gmem">${gEsc(m.text)}</div>`)
+    .join('') || '<div class="grel" style="color:var(--muted)">暂无关联记忆</div>';
+
+  box.style.color = 'var(--text)';
+  box.innerHTML = `
+    <div style="font-size:16px; font-weight:600;">${gEsc(node.name)}</div>
+    <div style="margin-top:2px; color:var(--muted); font-size:12px;">
+      ${TYPE_LABEL[node.type] || '实体'} · 提及 ${node.mentions} 次
+    </div>
+    <div class="gsec">关系 ${edges.length}</div>
+    ${relHtml}
+    <div class="gsec">相关记忆 ${memIds.length}</div>
+    ${memHtml}
+  `;
 }
 
 function bindGraph() {
   const canvas = $('#graph-canvas');
-  if (canvas) {
-    canvas.onclick = (ev) => {
-      const rect = canvas.getBoundingClientRect();
-      const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
-      let best = null, bestD = Infinity;
-      for (const n of graphState.nodes) {
-        const d = Math.hypot((graphState.screen.get(n.id)?.x ?? -9999) - mx, (graphState.screen.get(n.id)?.y ?? -9999) - my);
-        if (d < bestD && d < 26) { best = n; bestD = d; }
-      }
-      graphState.selected = best ? best.id : null;
-      renderGraphDetail(graphState.selected);
-    };
-  }
+  if (!canvas) return;
+
+  canvas.addEventListener('mousedown', (ev) => {
+    graphState.drag = { x: ev.clientX, y: ev.clientY, tx: graphState.view.tx, ty: graphState.view.ty, moved: false };
+    canvas.style.cursor = 'grabbing';
+  });
+
+  window.addEventListener('mousemove', (ev) => {
+    const drag = graphState.drag;
+    if (drag) {
+      const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+      graphState.view.tx = drag.tx + dx;
+      graphState.view.ty = drag.ty + dy;
+      return;
+    }
+    // hover 高亮
+    const node = pickNode(ev.clientX, ev.clientY);
+    const id = node ? node.id : null;
+    if (graphState.hover !== id) {
+      graphState.hover = id;
+      canvas.style.cursor = id ? 'pointer' : 'grab';
+    }
+  });
+
+  window.addEventListener('mouseup', (ev) => {
+    const drag = graphState.drag;
+    graphState.drag = null;
+    canvas.style.cursor = 'grab';
+    if (!drag || drag.moved) return;
+    const rect = canvas.getBoundingClientRect();
+    if (ev.clientX < rect.left || ev.clientX > rect.right) return;
+    const node = pickNode(ev.clientX, ev.clientY);
+    graphState.selected = node ? node.id : null;
+    void renderGraphDetail(graphState.selected);
+  });
+
+  canvas.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const { rect } = canvasRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    const v = graphState.view;
+    const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const next = Math.min(4, Math.max(0.25, v.scale * factor));
+    // 以鼠标位置为锚点缩放
+    v.tx = mx - (mx - v.tx) * (next / v.scale);
+    v.ty = my - (my - v.ty) * (next / v.scale);
+    v.scale = next;
+  }, { passive: false });
+
+  const reset = $('#btn-graph-reset');
+  if (reset) reset.onclick = () => { fitGraphView(); };
+
   const reload = $('#btn-graph-reload');
-  if (reload) reload.onclick = () => loadGraph();
+  if (reload) reload.onclick = () => { loadGraph(); };
+
   const rebuild = $('#btn-graph-rebuild');
   if (rebuild) rebuild.onclick = async () => {
     rebuild.disabled = true;
@@ -1001,8 +1202,9 @@ function bindGraph() {
       const r = await api('/api/graph/rebuild', { method: 'POST' });
       if (r.error) toast('重建失败: ' + r.error, 'error');
       else toast(`重建完成：${r.nodes} 个实体 / ${r.edges} 条关系`);
+      graphState.memories = null;
       await loadGraph();
-    } catch (err) {
+    } catch {
       toast('重建失败', 'error');
     } finally {
       rebuild.disabled = false;
@@ -1933,6 +2135,7 @@ $('#btn-c-save').onclick = async () => {
 
 /* ================= 启动 ================= */
 try { activeScene = localStorage.getItem('pasc-scene') || null; } catch (e) { activeScene = null; }
+bindGraph();
 setView(currentView(), { replaceHash: true });
 pollHealth();
 pollStats();
