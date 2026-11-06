@@ -35,3 +35,5 @@ export * from './pair-filter.js';
 export * from './vision.js';
 
 export * from './audit-log.js';
+
+export * from './memory-graph.js';

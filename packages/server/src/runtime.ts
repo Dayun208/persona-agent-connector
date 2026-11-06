@@ -39,7 +39,7 @@ import { NapCatClient, type NapCatStatus } from '@pasc/napcat';
 import { createAgentTransport, probeAgent, type AgentTransport } from '@pasc/agent';
 import type { CompleteOptions, LlmMessage } from '@pasc/core';
 import { Pipeline, type PipelineEvent } from './pipeline.js';
-import { findUnknownConfigKeys, ExecutionLog, AuditLog, distillPersona, extractQaPairs, extractEpisode, extractionOptionsFrom, collectUserMessages, type TextCompleter, type AuditRecord } from '@pasc/core';
+import { findUnknownConfigKeys, ExecutionLog, AuditLog, MemoryGraph, extractGraph, distillPersona, extractQaPairs, extractEpisode, extractionOptionsFrom, collectUserMessages, type TextCompleter, type AuditRecord } from '@pasc/core';
 
 export interface RuntimePaths {
   home: string;
@@ -53,6 +53,7 @@ export interface RuntimePaths {
   logFile: string;
   executionsFile: string;
   auditFile: string;
+  graphFile: string;
 }
 
 export function resolvePaths(home: string): RuntimePaths {
@@ -69,6 +70,7 @@ export function resolvePaths(home: string): RuntimePaths {
     logFile: join(home, 'logs', 'pasc.log'),
     executionsFile: join(dataDir, 'executions.jsonl'),
     auditFile: join(dataDir, 'audit.jsonl'),
+    graphFile: join(dataDir, 'memory-graph.json'),
   };
 }
 
@@ -131,6 +133,7 @@ export class Runtime {
   private pipeline!: Pipeline;
   private startedAt = Date.now();
   private readonly audit: AuditLog;
+  private graph!: MemoryGraph;
   private napcatStatus: NapCatStatus = 'idle';
 
   private constructor(
@@ -182,6 +185,7 @@ export class Runtime {
 
     this.personas = await PersonaStore.open(this.paths.personasFile);
     this.samples = await SampleStore.open(this.paths.samplesFile, { seed: false });
+    this.graph = await MemoryGraph.open(this.paths.graphFile);
     this.memories = await MemoryEngine.open(this.paths.memoryFile, {
       getConfig: () => this.configValue.memory,
       // 自检没通过（向量退化）时返回 undefined，记忆引擎自动退回关键词召回
@@ -529,6 +533,9 @@ export class Runtime {
     }
 
     await this.memories.flush();
+
+    // 图谱跟着记忆走：抽取完成后异步更新，不阻塞对话
+    void this.updateGraph(ingested.records.map((r) => ({ id: r.id, text: r.text })), sceneKey).catch(() => undefined);
 
     this.logger.info('记忆抽取完成', {
       sceneKey: sceneKey ?? 'all',
@@ -980,6 +987,75 @@ export class Runtime {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * 把新写入的记忆并进图谱。
+   * 用和抽取同一套客户端（默认 DeepSeek），异步跑，失败只记日志。
+   */
+  private async updateGraph(records: Array<{ id: string; text: string }>, sceneKey?: string): Promise<void> {
+    if (records.length === 0) return;
+    const client = this.extractClient();
+    if (!client?.configured) return;
+
+    const { data, warning } = await extractGraph(client, records.map((r) => r.text));
+    if (!data) {
+      if (warning) this.logger.debug('图谱抽取未产出', { reason: warning });
+      return;
+    }
+    // 一次抽多条的实体，挂到这一批的第一条记忆上即可，能追溯即可
+    const memoryId = records[0]?.id ?? '';
+    this.graph.merge(data.entities, data.relations, memoryId, this.qqToNickname(sceneKey));
+    await this.graph.save();
+    this.logger.info('记忆图谱更新', {
+      entities: data.entities.length,
+      relations: data.relations.length,
+      nodes: this.graph.nodeCount,
+      edges: this.graph.edgeCount,
+    });
+  }
+
+  /** QQ 号 → 昵称，让图上显示人名而不是号码 */
+  private qqToNickname(sceneKey?: string): ((name: string) => string) | undefined {
+    if (!sceneKey) return undefined;
+    try {
+      const rows = this.archive.countBySender(sceneKey);
+      const map = new Map(rows.map((r) => [r.senderId, r.senderName || r.senderId]));
+      return (name: string) => (/^\d{5,}$/.test(name) ? (map.get(name) ?? name) : name);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 前端用：整张图的快照 */
+  graphSnapshot(): ReturnType<MemoryGraph['snapshot']> {
+    return this.graph.snapshot();
+  }
+
+  /** 前端用：某个实体的详情 */
+  graphAbout(nodeId: string) {
+    return this.graph.about(nodeId);
+  }
+
+  /** 全量重建：把现有记忆重新过一遍 */
+  async rebuildGraph(): Promise<{ nodes: number; edges: number; batches: number }> {
+    const client = this.extractClient();
+    if (!client?.configured) throw new Error('未配置抽取模型');
+    await this.graph.clear();
+
+    const all = this.memories.list({ limit: 500 }).filter((m) => m.status === 'active');
+    let batches = 0;
+    // 每次 8 条，避免一次塞太多导致模型漏抽
+    for (let i = 0; i < all.length; i += 8) {
+      const batch = all.slice(i, i + 8);
+      const { data } = await extractGraph(client, batch.map((m) => m.text));
+      if (data && (data.entities.length > 0 || data.relations.length > 0)) {
+        this.graph.merge(data.entities, data.relations, batch[0]!.id, this.qqToNickname(batch[0]!.sceneKey));
+        batches += 1;
+      }
+    }
+    await this.graph.save();
+    return { nodes: this.graph.nodeCount, edges: this.graph.edgeCount, batches };
   }
 
   /** 管理员命令审计：append-only，不阻塞主流程 */
