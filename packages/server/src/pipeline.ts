@@ -270,7 +270,8 @@ export class Pipeline {
       timestamp: event.timestamp,
       seq: pool.nextSeq(),
       isSelf: false,
-      mentionsSelf: true,
+      // 别伪装成 @：判断模型会把它读成"消息 @ 了我"，日志里看不出是戳
+      mentionsSelf: false,
       atTargets: [],
       segments: [],
     };
@@ -291,7 +292,7 @@ export class Pipeline {
       logger.info('戳一戳判断为不回复', { sceneKey, reason: decision.reason });
       return;
     }
-    await this.runReply({ trigger, reason: 'manual', decision });
+    await this.runReply({ trigger, reason: 'poke', decision });
   }
 
   async judgeOnly(msg: ChatMessage): Promise<JudgeDecision> {
@@ -479,12 +480,13 @@ export class Pipeline {
 
       // 被 @ / 私聊 / 点名关键词触发时，"不说话"几乎总是错的：
       // 对方明确叫了你却没有回应，观感比回得不好更差。重试一次并明确要求回应。
-      const mustAnswer = trigger.mentionsSelf || trigger.scene.kind === 'private' || Boolean(ctx.matchedKeyword);
+      const mustAnswer = trigger.mentionsSelf || trigger.scene.kind === 'private'
+        || ctx.reason === 'poke' || Boolean(ctx.matchedKeyword);
       const isEmpty = (out: typeof parsed): boolean => out.messages.every((m) => !m.trim()) && out.executions.length === 0;
       if (mustAnswer && isEmpty(parsed)) {
         logger.info('明确点名却选择不发言，带提示重试一次', { sceneKey, triggerId: trigger.id });
         const retry = await agent.send({
-          system: `${bundle.system}\n\n【重要】这条消息明确指向你（@你 / 私聊 / 点你名字），必须回应一句。`
+          system: `${bundle.system}\n\n【重要】这次互动明确指向你（@你 / 私聊 / 点了你名字 / 戳了你），必须回应一句。`
             + '不要输出空 message，也不要继续沉默。',
           user: bundle.user,
           ...(attachments.length > 0 ? { attachments } : {}),

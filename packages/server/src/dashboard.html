@@ -1579,8 +1579,8 @@ function pushEvent(ev) {
   const pair = EVENT_LABEL[ev.type] || ['judge', ev.type];
   const d = ev.data || {};
   let text = '';
-  if (ev.type === 'message') text = (d.senderName || d.senderId) + ': ' + (d.text || '');
-  else if (ev.type === 'judge') text = (d.shouldReply ? '放行 ' : '沉默 ') + d.confidence + ' · ' + (d.reason || '');
+  if (ev.type === 'message') text = d.poke ? ('戳一戳 · ' + (d.senderName || d.senderId)) : ((d.senderName || d.senderId) + ': ' + (d.text || ''));
+  else if (ev.type === 'judge') text = (d.poke ? '[戳一戳] ' : '') + (d.shouldReply ? '放行 ' : '沉默 ') + d.confidence + ' · ' + (d.reason || '');
   else if (ev.type === 'reply') text = d.text || '';
   else if (ev.type === 'execution') text = d.action + ' ' + (d.ok ? '✔' : '✘') + ' ' + (d.detail ? JSON.stringify(d.detail).slice(0, 90) : d.reason || '');
   else if (ev.type === 'prompt') text = d.chars + ' 字 · ' + d.tokens + ' tok · ' + (d.sections || []).join('+');

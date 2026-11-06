@@ -6,7 +6,7 @@ import { renderMessageLine, sceneLabel } from './types.js';
 import { extractJsonValue } from './json-utils.js';
 import { JUDGE_SYSTEM_PROMPT } from './prompt-defaults.js';
 
-export type TriggerReason = 'mention' | 'keyword' | 'reply' | 'judge' | 'manual';
+export type TriggerReason = 'mention' | 'keyword' | 'reply' | 'judge' | 'manual' | 'poke';
 
 export interface JudgeInput {
   scene: Scene;

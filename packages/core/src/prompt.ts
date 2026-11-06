@@ -50,6 +50,7 @@ const REASON_HINTS: Record<TriggerReason, string> = {
   keyword: '有人提到了触发词, 你可以自然地接一句。',
   judge: '根据上下文判断, 现在适合你插一句话。',
   manual: '管理员手动触发了这次回复。',
+  poke: '有人戳了戳你 —— 这是明确针对你的互动, 该给个反应。',
 };
 
 /** 段落元信息: priority 越小越先被丢 */
@@ -97,8 +98,8 @@ export class PromptBuilder {
           + '不用提"图片附件""识别结果"这类技术词。'
         : '';
       // 被 @ / 私聊时必须回应 —— 这条不依赖已存的 base 文本，保证老配置也生效
-      const mustReplyHint = ctx.trigger.mentionsSelf || ctx.trigger.scene.kind === 'private'
-        ? '\n\n【必须回应】这条消息直接指向你（@ 你 或 私聊），不要输出空 message，必须开口说一句。'
+      const mustReplyHint = ctx.trigger.mentionsSelf || ctx.trigger.scene.kind === 'private' || ctx.reason === 'poke'
+        ? '\n\n【必须回应】这次互动直接指向你（被 @ / 私聊 / 被戳），不要输出空 message，必须开口说一句。'
         : '';
       blocks.push({ id: 'base', text: cfg.base.trim() + searchHint + imageHint + mustReplyHint, priority: 90 });
     }

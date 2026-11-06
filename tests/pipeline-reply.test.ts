@@ -77,3 +77,15 @@ describe('被 @ 时不许沉默', () => {
     expect(calls.length).toBeLessThanOrEqual(1);
   });
 });
+
+describe('戳一戳也要求回应', () => {
+  it('戳一戳空输出会重试', async () => {
+    const { pipeline, calls } = makePipeline(['{"message":""}', '{"message":"别戳"}']);
+    await pipeline.onPoke({
+      operatorId: '10001', targetId: '999',
+      scene: { kind: 'group', groupId: '1' }, timestamp: Date.now(),
+    } as never);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.system).toContain('必须回应');
+  });
+});
