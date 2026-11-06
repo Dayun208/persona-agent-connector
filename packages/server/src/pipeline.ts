@@ -17,6 +17,8 @@ import type {
 import {
   parseAgentOutput,
   shouldRunJudge,
+  understandImage,
+  renderImageNote,
   splitForHumanStyle,
   stripBlockedCommands,
   sceneLabel,
@@ -26,6 +28,7 @@ import {
 } from '@pasc/core';
 import type { NapCatClient } from '@pasc/napcat';
 import type { AgentTransport } from '@pasc/agent';
+import { homedir } from 'node:os';
 
 export type PipelineEventType =
   | 'message'
@@ -90,6 +93,8 @@ export class Pipeline {
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly seen = new Map<string, number>();
   private readonly sent: SentRecord[] = [];
+  /** 图片识别结果缓存：image file → 文本（同一张图只识别一次） */
+  private readonly imageNotes = new Map<string, string>();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -107,6 +112,8 @@ export class Pipeline {
     const { pool, stats, archive, logger, emit } = this.deps;
 
     msg.seq = pool.nextSeq();
+    // 图片先转成文字再入库：DeepSeek 没有视觉能力，识图必须在本地做掉
+    if (cfg.vision.enabled) await this.enrichImages(msg, cfg);
     archive.append(msg);
     stats.messagesIn += 1;
 
@@ -393,6 +400,57 @@ export class Pipeline {
       default:
         return execution.action;
     }
+  }
+
+  /** 把消息里的图片转成文字摘要，拼进 text（有缓存，同一张图只识别一次） */
+  private async enrichImages(msg: ChatMessage, cfg: PascConfig): Promise<void> {
+    const images = msg.segments.filter((seg) => seg.type === 'image') as Array<{ type: 'image'; file?: string; url?: string }>;
+    if (images.length === 0) return;
+
+    const { napcat, logger } = this.deps;
+    const notes: string[] = [];
+
+    for (const img of images.slice(0, cfg.vision.maxImages)) {
+      const key = img.file || img.url || '';
+      if (!key) continue;
+
+      const cached = this.imageNotes.get(key);
+      if (cached !== undefined) {
+        if (cached) notes.push(cached);
+        continue;
+      }
+
+      const info = img.file ? await napcat.getImage(img.file) : undefined;
+      const containerPath = info?.file || '';
+      if (!containerPath) {
+        this.imageNotes.set(key, '');
+        continue;
+      }
+
+      const result = await understandImage(containerPath, cfg.vision, {
+        resolvePath: (p) => this.toHostPath(p, cfg),
+      });
+      const note = renderImageNote(result);
+      this.imageNotes.set(key, note);
+      if (this.imageNotes.size > 500) {
+        const first = this.imageNotes.keys().next().value;
+        if (first !== undefined) this.imageNotes.delete(first);
+      }
+      if (note) {
+        notes.push(note);
+        logger.debug('图片识别完成', { file: img.file, kind: result?.kind, ms: result?.latencyMs });
+      }
+    }
+
+    if (notes.length > 0) msg.text = `${msg.text}\n${notes.join('\n')}`.trim();
+  }
+
+  /** 容器内路径 → 宿主机路径（NapCat 跑在 Docker 里） */
+  private toHostPath(containerPath: string, cfg: PascConfig): string {
+    const from = cfg.vision.mountFrom.replace(/\/+$/, '');
+    if (!from || !containerPath.startsWith(from)) return containerPath;
+    const to = (cfg.vision.mountTo || `${homedir()}/pasc-docker/napcat/qq`).replace(/\/+$/, '');
+    return to + containerPath.slice(from.length);
   }
 
   /** 最近在会话里出现过的成员（去重、带上触发者），用于让模型把昵称映射成 QQ 号 */

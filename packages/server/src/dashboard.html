@@ -590,6 +590,17 @@
           <div class="field"><label>判断 API</label><input class="input" id="c-judge-api" /></div>
           <div class="field"><label>冷却（秒）</label><input class="input" id="c-cooldown" type="number" min="0" /></div>
         </div>
+        <div class="row3" style="margin-top:12px;">
+          <label class="check"><input type="checkbox" id="c-vision" /> 识图（本地 OCR）</label>
+          <div class="field"><label>识图模式</label>
+            <select class="input" id="c-vision-mode">
+              <option value="ocr">只读文字（快，约 2 秒）</option>
+              <option value="auto">先读字，没有字再描述（慢）</option>
+              <option value="describe">直接描述画面（15~30 秒）</option>
+            </select>
+          </div>
+          <div class="field"><label>视觉模型</label><input class="input" id="c-vision-model" /></div>
+        </div>
 
         <div class="section-title">行为</div>
         <div class="row2">
@@ -1589,6 +1600,10 @@ async function loadConfig() {
     $('#c-handle-private').checked = !!c.pipeline.handlePrivate;
     $('#c-quote').checked = !!c.pipeline.quoteReply;
     $('#c-websearch').checked = c.openclaw.webSearch !== false;
+    const v = c.vision || {};
+    $('#c-vision').checked = !!v.enabled;
+    $('#c-vision-mode').value = v.mode || 'ocr';
+    $('#c-vision-model').value = (v.api && v.api.model) || 'GLM-OCR';
     const inj = c.prompt.inject || {};
     $('#i-base').checked = !!inj.base; $('#i-persona').checked = !!inj.persona;
     $('#i-samples').checked = !!inj.samples; $('#i-memory').checked = !!inj.memory;
@@ -1624,6 +1639,11 @@ $('#btn-c-save').onclick = async () => {
       allowFileSend: $('#c-allow-file').checked,
       allowRecall: $('#c-allow-recall').checked,
       allowPoke: $('#c-allow-poke').checked,
+    },
+    vision: {
+      enabled: $('#c-vision').checked,
+      mode: $('#c-vision-mode').value,
+      api: { model: $('#c-vision-model').value.trim() || 'GLM-OCR' },
     },
     prompt: { inject: {
       base: $('#i-base').checked, persona: $('#i-persona').checked, samples: $('#i-samples').checked,

@@ -197,6 +197,16 @@ export class NapCatClient extends EventEmitter<NapCatEvents> {
     return this.call('friend_poke', { user_id: userId });
   }
 
+  /** 取图片在容器里的真实路径（NapCat 会把收到的图缓存下来） */
+  async getImage(file: string): Promise<{ file?: string; url?: string } | undefined> {
+    try {
+      const raw = (await this.call('get_image', { file })) as { data?: { file?: string; url?: string } };
+      return raw?.data;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** 好友列表（用于设置页选择管理员） */
   async getFriendList(): Promise<Array<{ userId: string; nickname: string; remark: string }>> {
     const raw = (await this.call('get_friend_list', {})) as unknown;

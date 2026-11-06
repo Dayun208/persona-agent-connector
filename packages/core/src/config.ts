@@ -111,6 +111,34 @@ const AgentConfigSchema = z
   })
   .default({});
 
+const VisionConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    /**
+     * ocr      = 只读图上的文字（快，2 秒左右，适合截图/梗图）
+     * describe = 描述画面内容（慢，15~30 秒，适合照片）
+     * auto     = 先 OCR，读不到字再描述
+     */
+    mode: z.enum(['ocr', 'describe', 'auto']).default('ocr'),
+    api: z
+      .object({
+        baseURL: z.string().default('http://127.0.0.1:8000/v1'),
+        apiKey: z.string().default(''),
+        model: z.string().default('GLM-OCR'),
+        describeModel: z.string().default('GLM-4.6V-Flash-MLX-6bit'),
+        timeoutMs: z.number().int().positive().default(45_000),
+      })
+      .default({}),
+    /** 单条消息最多处理几张图 */
+    maxImages: z.number().int().min(1).max(4).default(2),
+    /** OCR 结果短于这个字数就认为"图上没字" */
+    minText: z.number().int().min(0).default(2),
+    /** 容器内路径 → 宿主机路径的映射（NapCat 跑在 Docker 里） */
+    mountFrom: z.string().default('/app/.config/QQ'),
+    mountTo: z.string().default(''),
+  })
+  .default({});
+
 const JudgeConfigSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -322,6 +350,7 @@ export const PascConfigSchema = z
     server: ServerConfigSchema,
     napcat: NapCatConfigSchema,
     openclaw: AgentConfigSchema,
+    vision: VisionConfigSchema,
     judgeModel: JudgeConfigSchema,
     embedding: EmbeddingConfigSchema,
     memory: MemoryConfigSchema,
@@ -339,6 +368,7 @@ export type PascConfig = z.infer<typeof PascConfigSchema>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 export type NapCatConfig = z.infer<typeof NapCatConfigSchema>;
 export type JudgeConfig = z.infer<typeof JudgeConfigSchema>;
+export type VisionConfig = z.infer<typeof VisionConfigSchema>;
 export type BehaviorConfig = z.infer<typeof BehaviorConfigSchema>;
 export type PipelineConfig = z.infer<typeof PipelineConfigSchema>;
 export type ExtractionConfig = z.infer<typeof ExtractionConfigSchema>;
