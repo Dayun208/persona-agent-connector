@@ -472,9 +472,38 @@ export class Pipeline {
       });
       stats.recordAgent(response.latencyMs);
 
-      const parsed = parseAgentOutput(response.text);
+      let parsed = parseAgentOutput(response.text);
       if (parsed.warnings.length > 0) {
         logger.warn('Agent 输出有异常', { warnings: parsed.warnings, preview: response.text.slice(0, 120) });
+      }
+
+      // 被 @ / 私聊 / 点名关键词触发时，"不说话"几乎总是错的：
+      // 对方明确叫了你却没有回应，观感比回得不好更差。重试一次并明确要求回应。
+      const mustAnswer = trigger.mentionsSelf || trigger.scene.kind === 'private' || Boolean(ctx.matchedKeyword);
+      const isEmpty = (out: typeof parsed): boolean => out.messages.every((m) => !m.trim()) && out.executions.length === 0;
+      if (mustAnswer && isEmpty(parsed)) {
+        logger.info('明确点名却选择不发言，带提示重试一次', { sceneKey, triggerId: trigger.id });
+        const retry = await agent.send({
+          system: `${bundle.system}\n\n【重要】这条消息明确指向你（@你 / 私聊 / 点你名字），必须回应一句。`
+            + '不要输出空 message，也不要继续沉默。',
+          user: bundle.user,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          meta: {
+            sceneKey,
+            sceneLabel: sceneLabel(trigger.scene),
+            triggerId: trigger.id,
+            reason: ctx.reason,
+            ...(persona ? { personaName: persona.name, personaId: persona.id } : {}),
+            ...(cfg.openclaw.agentId ? { agentId: cfg.openclaw.agentId } : {}),
+          },
+        });
+        stats.recordAgent(retry.latencyMs);
+        const retried = parseAgentOutput(retry.text);
+        if (!isEmpty(retried)) {
+          parsed = retried;
+        } else {
+          logger.warn('重试仍然没有产出，放弃这条', { sceneKey, preview: retry.text.slice(0, 120) });
+        }
       }
 
       await this.deliver(trigger, parsed, isAdmin);

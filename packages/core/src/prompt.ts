@@ -96,7 +96,11 @@ export class PromptBuilder {
         ? '\n\n【图片】消息里如果带了图，你是能直接看到的。看图说话就行，'
           + '不用提"图片附件""识别结果"这类技术词。'
         : '';
-      blocks.push({ id: 'base', text: cfg.base.trim() + searchHint + imageHint, priority: 90 });
+      // 被 @ / 私聊时必须回应 —— 这条不依赖已存的 base 文本，保证老配置也生效
+      const mustReplyHint = ctx.trigger.mentionsSelf || ctx.trigger.scene.kind === 'private'
+        ? '\n\n【必须回应】这条消息直接指向你（@ 你 或 私聊），不要输出空 message，必须开口说一句。'
+        : '';
+      blocks.push({ id: 'base', text: cfg.base.trim() + searchHint + imageHint + mustReplyHint, priority: 90 });
     }
 
     if (inject.persona && !ctx.devMode && ctx.persona?.content.trim()) {
