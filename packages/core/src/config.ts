@@ -89,6 +89,12 @@ const AgentConfigSchema = z
      */
     systemMode: z.enum(['inline', 'message']).default('inline'),
     /**
+     * 允许 Agent 联网搜索。
+     * OpenClaw 自身已接好 web.search（默认 parallel-free，无需 key），
+     * 这里只控制"要不要在 Prompt 里提示它可以用"，关掉能省掉一次工具往返的延迟。
+     */
+    webSearch: z.boolean().default(true),
+    /**
      * 目标子 Agent 标识。
      * OpenClaw 可以挂多个子 agent(每个有自己的人格), 中间件要把消息投给指定的那个,
      * 否则会投到默认 agent 上, 人格就被"套娃"了。

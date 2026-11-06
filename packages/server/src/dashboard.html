@@ -616,6 +616,7 @@
           <label class="check"><input type="checkbox" id="c-allow-poke" /> 戳一戳</label>
           <label class="check"><input type="checkbox" id="c-handle-private" /> 处理私聊</label>
           <label class="check"><input type="checkbox" id="c-quote" /> 回复带引用</label>
+          <label class="check"><input type="checkbox" id="c-websearch" /> 允许联网搜索</label>
         </div>
 
         <div class="section-title">注入</div>
@@ -1587,6 +1588,7 @@ async function loadConfig() {
     $('#c-allow-poke').checked = !!c.behavior.allowPoke;
     $('#c-handle-private').checked = !!c.pipeline.handlePrivate;
     $('#c-quote').checked = !!c.pipeline.quoteReply;
+    $('#c-websearch').checked = c.openclaw.webSearch !== false;
     const inj = c.prompt.inject || {};
     $('#i-base').checked = !!inj.base; $('#i-persona').checked = !!inj.persona;
     $('#i-samples').checked = !!inj.samples; $('#i-memory').checked = !!inj.memory;
@@ -1602,7 +1604,12 @@ $('#btn-c-save').onclick = async () => {
   const admins = [...adminList];
   const patch = {
     napcat: { address: $('#c-napcat-addr').value.trim(), accessToken: $('#c-napcat-token').value.trim(), selfId: $('#c-selfid').value.trim() },
-    openclaw: { address: $('#c-agent-addr').value.trim(), token: $('#c-agent-token').value.trim(), agentId: $('#c-agent-id').value.trim() },
+    openclaw: {
+      address: $('#c-agent-addr').value.trim(),
+      token: $('#c-agent-token').value.trim(),
+      agentId: $('#c-agent-id').value.trim(),
+      webSearch: $('#c-websearch').checked,
+    },
     judgeModel: {
       enabled: $('#c-judge-on').checked,
       replyThreshold: Number($('#c-threshold').value),

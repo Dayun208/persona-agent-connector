@@ -21,6 +21,8 @@ export interface PromptBuildContext {
   memories?: MemoryHit[];
   /** 由 ActionGuard 生成的可用动作说明, 为空则不注入行为段落 */
   actionsText?: string;
+  /** 是否允许联网搜索（由 openclaw.webSearch 控制） */
+  webSearch?: boolean;
   /** 本会话最近出现的成员（供模型把昵称映射成 QQ 号） */
   members?: Array<{ id: string; name: string }>;
   /** 触发关键词(便于模型知道自己为什么被叫) */
@@ -80,7 +82,14 @@ export class PromptBuilder {
 
     // ---------- system 段落 ----------
     const blocks: Block[] = [];
-    if (inject.base && cfg.base.trim()) blocks.push({ id: 'base', text: cfg.base.trim(), priority: 90 });
+    if (inject.base && cfg.base.trim()) {
+      // 联网提示按开关注入，而不是写死在 base 文本里 —— 已经存过配置的老用户也能生效
+      const searchHint = ctx.webSearch
+        ? '\n\n【联网】需要最新信息(价格/新闻/版本号/比分, 或你明显不知道的事实)时可以先用联网搜索查证再回答；'
+          + '查完只给结论，不要念搜索结果，也不要说"我搜了一下"。日常闲聊不用搜。'
+        : '';
+      blocks.push({ id: 'base', text: cfg.base.trim() + searchHint, priority: 90 });
+    }
 
     if (inject.persona && ctx.persona?.content.trim()) {
       blocks.push({

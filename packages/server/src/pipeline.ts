@@ -217,6 +217,7 @@ export class Pipeline {
       memories,
       actionsText: guard.describeForPrompt({ isAdmin, allowUserActions: cfg.behavior.allowUserActions }),
       members: this.recentMembers(msg.sceneKey, msg),
+      webSearch: cfg.openclaw.webSearch,
       secondsSinceLastReply: this.secondsSinceLastReply(msg.sceneKey),
     });
   }
@@ -317,6 +318,7 @@ export class Pipeline {
         memories,
         actionsText,
         members: this.recentMembers(sceneKey, trigger),
+        webSearch: cfg.openclaw.webSearch,
         ...(ctx.matchedKeyword ? { matchedKeyword: ctx.matchedKeyword } : {}),
         secondsSinceLastReply: this.secondsSinceLastReply(sceneKey),
       });
