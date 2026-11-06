@@ -591,12 +591,13 @@
           <div class="field"><label>冷却（秒）</label><input class="input" id="c-cooldown" type="number" min="0" /></div>
         </div>
         <div class="row3" style="margin-top:12px;">
-          <label class="check"><input type="checkbox" id="c-vision" /> 识图（本地 OCR）</label>
+          <label class="check"><input type="checkbox" id="c-vision" /> 识图</label>
           <div class="field"><label>识图模式</label>
             <select class="input" id="c-vision-mode">
-              <option value="ocr">只读文字（快，约 2 秒）</option>
-              <option value="auto">先读字，没有字再描述（慢）</option>
-              <option value="describe">直接描述画面（15~30 秒）</option>
+              <option value="agent">附给 Agent（DeepSeek 视觉，推荐）</option>
+              <option value="ocr">本地只读文字（约 2 秒）</option>
+              <option value="auto">本地：先读字，无字再描述（慢）</option>
+              <option value="describe">本地：直接描述画面（15~30 秒）</option>
             </select>
           </div>
           <div class="field"><label>视觉模型</label><input class="input" id="c-vision-model" /></div>
@@ -1602,7 +1603,7 @@ async function loadConfig() {
     $('#c-websearch').checked = c.openclaw.webSearch !== false;
     const v = c.vision || {};
     $('#c-vision').checked = !!v.enabled;
-    $('#c-vision-mode').value = v.mode || 'ocr';
+    $('#c-vision-mode').value = v.mode || 'agent';
     $('#c-vision-model').value = (v.api && v.api.model) || 'GLM-OCR';
     const inj = c.prompt.inject || {};
     $('#i-base').checked = !!inj.base; $('#i-persona').checked = !!inj.persona;

@@ -115,11 +115,12 @@ const VisionConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
     /**
+     * agent    = 把图片附给 Agent（DeepSeek Flash 原生支持视觉，不占本地显存）★推荐
      * ocr      = 只读图上的文字（快，2 秒左右，适合截图/梗图）
      * describe = 描述画面内容（慢，15~30 秒，适合照片）
      * auto     = 先 OCR，读不到字再描述
      */
-    mode: z.enum(['ocr', 'describe', 'auto']).default('ocr'),
+    mode: z.enum(['agent', 'ocr', 'describe', 'auto']).default('agent'),
     api: z
       .object({
         baseURL: z.string().default('http://127.0.0.1:8000/v1'),

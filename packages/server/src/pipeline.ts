@@ -27,8 +27,9 @@ import {
   type PascConfig,
 } from '@pasc/core';
 import type { NapCatClient } from '@pasc/napcat';
-import type { AgentTransport } from '@pasc/agent';
+import type { AgentTransport, AgentAttachment } from '@pasc/agent';
 import { homedir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 
 export type PipelineEventType =
   | 'message'
@@ -95,6 +96,8 @@ export class Pipeline {
   private readonly sent: SentRecord[] = [];
   /** 图片识别结果缓存：image file → 文本（同一张图只识别一次） */
   private readonly imageNotes = new Map<string, string>();
+  /** 待附给 Agent 的图片（处理完即清空） */
+  private readonly pendingAttachments: AgentAttachment[] = [];
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -225,6 +228,7 @@ export class Pipeline {
       actionsText: guard.describeForPrompt({ isAdmin, allowUserActions: cfg.behavior.allowUserActions }),
       members: this.recentMembers(msg.sceneKey, msg),
       webSearch: cfg.openclaw.webSearch,
+      vision: cfg.vision.enabled,
       secondsSinceLastReply: this.secondsSinceLastReply(msg.sceneKey),
     });
   }
@@ -326,6 +330,7 @@ export class Pipeline {
         actionsText,
         members: this.recentMembers(sceneKey, trigger),
         webSearch: cfg.openclaw.webSearch,
+        vision: cfg.vision.enabled,
         ...(ctx.matchedKeyword ? { matchedKeyword: ctx.matchedKeyword } : {}),
         secondsSinceLastReply: this.secondsSinceLastReply(sceneKey),
       });
@@ -338,9 +343,11 @@ export class Pipeline {
       });
 
       const agent = getAgent();
+      const attachments = this.pendingAttachments.splice(0, this.pendingAttachments.length);
       const response = await agent.send({
         system: bundle.system,
         user: bundle.user,
+        ...(attachments.length > 0 ? { attachments } : {}),
         meta: {
           sceneKey,
           sceneLabel: sceneLabel(trigger.scene),
@@ -402,13 +409,38 @@ export class Pipeline {
     }
   }
 
-  /** 把消息里的图片转成文字摘要，拼进 text（有缓存，同一张图只识别一次） */
+  /**
+   * 处理消息里的图片。
+   *   mode=agent → 读出图片字节挂到 this.pendingAttachments，交给 Agent 自己看
+   *   其它模式   → 本地视觉模型转成文字，拼进正文
+   */
   private async enrichImages(msg: ChatMessage, cfg: PascConfig): Promise<void> {
     const images = msg.segments.filter((seg) => seg.type === 'image') as Array<{ type: 'image'; file?: string; url?: string }>;
     if (images.length === 0) return;
 
     const { napcat, logger } = this.deps;
     const notes: string[] = [];
+
+    // 走 Agent 视觉：不调本地模型，把图片字节附上去即可
+    if (cfg.vision.mode === 'agent') {
+      for (const img of images.slice(0, cfg.vision.maxImages)) {
+        if (!img.file) continue;
+        const info = await napcat.getImage(img.file);
+        if (!info?.file) continue;
+        try {
+          const buf = await readFile(this.toHostPath(info.file, cfg));
+          this.pendingAttachments.push({
+            mimeType: img.file.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+            fileName: img.file,
+            dataBase64: buf.toString('base64'),
+          });
+          msg.text = `${msg.text}\n[图片]`.trim();
+        } catch {
+          logger.debug('图片读取失败', { file: img.file });
+        }
+      }
+      return;
+    }
 
     for (const img of images.slice(0, cfg.vision.maxImages)) {
       const key = img.file || img.url || '';

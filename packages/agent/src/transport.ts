@@ -1,9 +1,18 @@
 import type { AgentConfig, Logger } from '@pasc/core';
 
 /** 发送给 Agent 的一次请求(已经是构建好的 Prompt) */
+export interface AgentAttachment {
+  mimeType: string;
+  fileName?: string;
+  /** base64（不带 data: 前缀） */
+  dataBase64: string;
+}
+
 export interface AgentRequest {
   system: string;
   user: string;
+  /** 随消息一起发给 Agent 的图片；模型支持视觉时会被真正"看到" */
+  attachments?: AgentAttachment[];
   meta: {
     sceneKey: string;
     sceneLabel: string;

@@ -106,6 +106,15 @@ export class GatewayAgentTransport implements AgentTransport {
         deliver: false,
         timeoutMs,
         ...(agentId ? { agentId } : {}),
+        ...(req.attachments && req.attachments.length > 0
+          ? {
+              attachments: req.attachments.map((a) => ({
+                mimeType: a.mimeType,
+                ...(a.fileName ? { fileName: a.fileName } : {}),
+                content: a.dataBase64,
+              })),
+            }
+          : {}),
       },
       timeoutMs,
     )) as { runId?: string; status?: string } | undefined;

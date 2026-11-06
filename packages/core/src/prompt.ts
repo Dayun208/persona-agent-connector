@@ -23,6 +23,8 @@ export interface PromptBuildContext {
   actionsText?: string;
   /** 是否允许联网搜索（由 openclaw.webSearch 控制） */
   webSearch?: boolean;
+  /** 是否启用了识图（由 vision.enabled 控制） */
+  vision?: boolean;
   /** 本会话最近出现的成员（供模型把昵称映射成 QQ 号） */
   members?: Array<{ id: string; name: string }>;
   /** 触发关键词(便于模型知道自己为什么被叫) */
@@ -88,7 +90,11 @@ export class PromptBuilder {
         ? '\n\n【联网】需要最新信息(价格/新闻/版本号/比分, 或你明显不知道的事实)时可以先用联网搜索查证再回答；'
           + '查完只给结论，不要念搜索结果，也不要说"我搜了一下"。日常闲聊不用搜。'
         : '';
-      blocks.push({ id: 'base', text: cfg.base.trim() + searchHint, priority: 90 });
+      const imageHint = ctx.vision
+        ? '\n\n【图片】消息里如果带了图，你是能直接看到的。看图说话就行，'
+          + '不用提"图片附件""识别结果"这类技术词。'
+        : '';
+      blocks.push({ id: 'base', text: cfg.base.trim() + searchHint + imageHint, priority: 90 });
     }
 
     if (inject.persona && ctx.persona?.content.trim()) {
