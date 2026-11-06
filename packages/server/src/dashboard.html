@@ -549,6 +549,10 @@
             <div class="field"><label>取多少条</label><input class="input" id="ex-limit" type="number" value="40" min="1" max="200" /></div>
             <label class="check"><input type="checkbox" id="ex-asks" /> 把「对方提问」也算进候选</label>
             <button class="btn primary" id="btn-ex-preview">生成候选</button>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input class="input" id="ex-keep" type="number" value="20" min="1" max="100" style="width:88px;" />
+              <button class="btn" id="btn-ex-ai" style="flex:1;">AI 筛选</button>
+            </div>
             <button class="btn" id="btn-ex-import">导入为 few-shot</button>
             <button class="btn" id="btn-ex-distill">生成人格（AI 提纯）</button>
             <div class="faint" id="ex-hint" style="font-size:12px;"></div>
@@ -1347,28 +1351,100 @@ async function loadExtractUsers() {
 }
 $('#ex-scene').onchange = () => loadExtractUsers();
 
-$('#btn-ex-preview').onclick = async () => {
-  const sceneKey = $('#ex-scene').value, senderId = $('#ex-user').value;
-  if (!senderId) { toast('先选一个用户'); return; }
+let exPairs = [];
+let exSelected = new Set();
+
+function renderExPairs(note) {
+  const list = $('#ex-list');
+  $('#ex-count').textContent = exPairs.length ? `${exSelected.size}/${exPairs.length} 对已选` : '';
+  if (!exPairs.length) {
+    list.innerHTML = '<div class="faint">' + (note || '没有候选。换成别人，或勾选「把对方提问也算进候选」。') + '</div>';
+    return;
+  }
+  list.innerHTML = exPairs.map((p) => {
+    const on = exSelected.has(p.id);
+    const ai = p.aiScore !== undefined
+      ? `<span class="tag accent">AI ${Number(p.aiScore).toFixed(2)}</span>`
+      : `<span class="tag">规则 ${Number(p.score ?? 0).toFixed(2)}</span>`;
+    return `<div class="qa" data-id="${esc(p.id)}" style="${on ? '' : 'opacity:.5'}">
+      <div style="display:flex; gap:8px; align-items:flex-start;">
+        <input type="checkbox" data-pick="${esc(p.id)}" ${on ? 'checked' : ''} style="margin-top:3px; accent-color:var(--accent);" />
+        <div style="flex:1; min-width:0;">
+          <div class="q">Q: ${esc(p.question)}</div>
+          <div class="a">A: ${esc(p.answer)}</div>
+          <div class="kv">${ai}${p.aiReason ? `<span class="faint" style="font-size:11.5px;">${esc(p.aiReason)}</span>` : ''}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  $$('#ex-list [data-pick]').forEach((box) => {
+    box.onchange = () => {
+      if (box.checked) exSelected.add(box.dataset.pick);
+      else exSelected.delete(box.dataset.pick);
+      renderExPairs();
+    };
+  });
+}
+
+function exParams() {
+  const sceneKey = $('#ex-scene').value;
+  const senderId = $('#ex-user').value;
   const qs = new URLSearchParams({ senderId, limit: $('#ex-limit').value || '40' });
   if (sceneKey) qs.set('sceneKey', sceneKey);
   if ($('#ex-asks').checked) qs.set('includeAsks', '1');
+  return { qs, sceneKey, senderId };
+}
+
+$('#btn-ex-preview').onclick = async () => {
+  const { qs, senderId } = exParams();
+  if (!senderId) { toast('先选一个用户'); return; }
   try {
     const d = await api('/api/extract/qas?' + qs.toString());
-    const pairs = d.pairs || [];
-    $('#ex-count').textContent = pairs.length ? pairs.length + ' 对' : '';
-    $('#ex-list').innerHTML = pairs.length
-      ? pairs.map((p) => '<div class="qa"><div class="q">Q: ' + esc(p.question || p.ask || '') + '</div><div class="a">A: ' + esc(p.answer || p.reply || '') + '</div></div>').join('')
-      : '<div class="faint">没有抽到配对。换成别人，或勾选「把对方提问也算进候选」。</div>';
-    $('#ex-hint').textContent = '目标用户发言 ' + (d.targetMessages || 0) + ' 条，配出 ' + pairs.length + ' 对';
+    exPairs = d.pairs || [];
+    exSelected = new Set(exPairs.map((p) => p.id));
+    renderExPairs();
+    $('#ex-hint').textContent = `目标用户发言 ${d.targetMessages || 0} 条，配出 ${exPairs.length} 对`;
   } catch (e) { toast('抽取失败：' + e.message); }
 };
 
-$('#btn-ex-import').onclick = async () => {
-  const sceneKey = $('#ex-scene').value, senderId = $('#ex-user').value;
-  if (!senderId) return;
+$('#btn-ex-ai').onclick = async () => {
+  const { senderId, sceneKey } = exParams();
+  if (!senderId) { toast('先选一个用户'); return; }
+  const btn = $('#btn-ex-ai');
+  btn.disabled = true; btn.textContent = '筛选中…';
   try {
-    const r = await api('/api/extract/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senderId, sceneKey, limit: Number($('#ex-limit').value) || 20 }) });
+    const d = await api('/api/extract/filter', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        senderId,
+        ...(sceneKey ? { sceneKey } : {}),
+        limit: Number($('#ex-limit').value) || 60,
+        maxKeep: Number($('#ex-keep').value) || 20,
+      }),
+    });
+    exPairs = d.pairs || [];
+    exSelected = new Set(exPairs.map((p) => p.id));
+    renderExPairs(d.note);
+    $('#ex-hint').textContent = d.pairs?.length
+      ? `从 ${d.total} 对里保留 ${d.kept} 对${d.failedBatches ? `（${d.failedBatches} 批模型没回好）` : ''}`
+      : (d.note || 'AI 一条都没保留——这批对话可能确实没有可用的样本');
+    toast(d.pairs?.length ? `AI 保留 ${d.kept} 对` : 'AI 未保留任何配对');
+  } catch (e) { toast('筛选失败：' + e.message); }
+  finally { btn.disabled = false; btn.textContent = 'AI 筛选'; }
+};
+
+$('#btn-ex-import').onclick = async () => {
+  const { senderId, sceneKey } = exParams();
+  if (!senderId) return;
+  const ids = [...exSelected];
+  if (exPairs.length && ids.length === 0) { toast('没有勾选任何配对'); return; }
+  try {
+    const r = await api('/api/extract/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ senderId, sceneKey, limit: Number($('#ex-limit').value) || 20, ...(ids.length ? { pairIds: ids } : {}) }),
+    });
     toast('已导入 ' + (r.count ?? r.imported ?? 0) + ' 条样本');
     loadSamples();
   } catch (e) { toast('导入失败：' + e.message); }

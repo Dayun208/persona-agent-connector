@@ -4,6 +4,7 @@ import {
   buildExportFilename,
   collectUserMessages,
   distillPersona,
+  filterPairsWithAI,
   extractQaPairs,
   extractionOptionsFrom,
   pairsToFewShotText,
@@ -526,6 +527,56 @@ export function createApi(runtime: Runtime): Router {
     }
 
     return { json: { ok: true, draft, personaId } };
+  });
+
+  router.post('/api/extract/filter', async (ctx) => {
+    const body = (ctx.body ?? {}) as {
+      senderId?: string;
+      sceneKey?: string;
+      limit?: number;
+      maxKeep?: number;
+      hint?: string;
+    };
+    if (!body.senderId) return { status: 400, json: { error: '需要 senderId' } };
+
+    const extracted = buildPairs(runtime, {
+      senderId: body.senderId,
+      ...(body.sceneKey ? { sceneKey: body.sceneKey } : {}),
+      limit: clampInt(String(body.limit ?? 60), 60, 1, 200),
+    });
+    if (extracted.pairs.length === 0) {
+      return { json: { ok: true, pairs: [], total: 0, kept: 0, batches: 0, failedBatches: 0, note: '没有可筛选的候选配对' } };
+    }
+
+    const client = runtime.distillClient();
+    if (!client?.configured) {
+      return { status: 400, json: { error: '提纯模型未配置，无法做 AI 筛选' } };
+    }
+
+    const targetName = extracted.pairs[0]?.target.name ?? body.senderId;
+    const result = await filterPairsWithAI(extracted.pairs, client, {
+      maxKeep: clampInt(String(body.maxKeep ?? 20), 20, 1, 100),
+      targetName,
+      ...(body.hint ? { hint: body.hint } : {}),
+    });
+
+    const byId = new Map(result.kept.map((v) => [v.id, v]));
+    const pairs = extracted.pairs
+      .filter((p) => byId.has(p.id))
+      .map((p) => ({ ...p, aiScore: byId.get(p.id)!.score, aiReason: byId.get(p.id)!.reason }))
+      .sort((a, b) => b.aiScore - a.aiScore);
+
+    return {
+      json: {
+        ok: true,
+        pairs,
+        total: extracted.pairs.length,
+        kept: pairs.length,
+        batches: result.batches,
+        failedBatches: result.failedBatches,
+        deduped: result.deduped,
+      },
+    };
   });
 
   router.post('/api/extract/import', async (ctx) => {

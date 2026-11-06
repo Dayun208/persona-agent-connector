@@ -29,3 +29,5 @@ export * from './store.js';
 export * from './text.js';
 
 export * from './execution-log.js';
+
+export * from './pair-filter.js';
