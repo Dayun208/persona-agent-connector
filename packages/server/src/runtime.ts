@@ -36,8 +36,9 @@ import {
 } from '@pasc/core';
 import { NapCatClient, type NapCatStatus } from '@pasc/napcat';
 import { createAgentTransport, probeAgent, type AgentTransport } from '@pasc/agent';
+import type { CompleteOptions, LlmMessage } from '@pasc/core';
 import { Pipeline, type PipelineEvent } from './pipeline.js';
-import { ExecutionLog, distillPersona, extractQaPairs, extractionOptionsFrom, collectUserMessages } from '@pasc/core';
+import { ExecutionLog, distillPersona, extractQaPairs, extractionOptionsFrom, collectUserMessages, type TextCompleter } from '@pasc/core';
 
 export interface RuntimePaths {
   home: string;
@@ -432,14 +433,46 @@ export class Runtime {
   }
 
   /** 手动/自动触发一次记忆抽取 */
+  /**
+   * 记忆抽取用的"客户端"。
+   *   distill → 本地蒸馏模型
+   *   agent   → OpenClaw 的专用 agent（DeepSeek），不占本地显存、质量更好
+   */
+  private extractClient(): TextCompleter | undefined {
+    const provider = this.configValue.memoryExtract.provider;
+    if (provider === 'agent') {
+      const agentId = this.configValue.memoryExtract.agentId;
+      return {
+        configured: true,
+        complete: async (msgs: LlmMessage[]) => {
+          const system = msgs.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
+          const user = msgs.filter((m) => m.role !== 'system').map((m) => m.content).join('\n\n');
+          const res = await this.agentTransport.send({
+            system,
+            user,
+            meta: {
+              sceneKey: 'pasc:extract',
+              sceneLabel: '记忆抽取',
+              triggerId: '',
+              reason: 'manual',
+              agentId,
+            },
+          });
+          return { text: res.text };
+        },
+      };
+    }
+    return this.distillClient();
+  }
+
   async runMemoryExtraction(sceneKey?: string): Promise<{
     candidates: number;
     added: number;
     merged: number;
     warnings: string[];
   }> {
-    const client = this.distillClient();
-    if (!client?.configured) throw new Error('未配置提取模型 (distill.api.baseURL / model)');
+    const client = this.extractClient();
+    if (!client?.configured) throw new Error('未配置提取模型 (memoryExtract.provider / distill.api)');
 
     const cfg = this.configValue.memory;
     const messages = this.sceneMessages(sceneKey, 40);

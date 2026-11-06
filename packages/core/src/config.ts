@@ -111,6 +111,18 @@ const AgentConfigSchema = z
   })
   .default({});
 
+const MemoryExtractConfigSchema = z
+  .object({
+    /**
+     * distill = 本地蒸馏模型（默认，省钱）
+     * agent   = 走 OpenClaw Agent（DeepSeek），质量更高，不占本地显存
+     */
+    provider: z.enum(['distill', 'agent']).default('distill'),
+    /** provider=agent 时用哪个 OpenClaw agent */
+    agentId: z.string().default('pasc-worker'),
+  })
+  .default({});
+
 const VisionConfigSchema = z
   .object({
     enabled: z.boolean().default(false),
@@ -362,6 +374,7 @@ export const PascConfigSchema = z
     openclaw: AgentConfigSchema,
     vision: VisionConfigSchema,
     devMode: DevModeConfigSchema,
+    memoryExtract: MemoryExtractConfigSchema,
     judgeModel: JudgeConfigSchema,
     embedding: EmbeddingConfigSchema,
     memory: MemoryConfigSchema,
@@ -381,6 +394,7 @@ export type NapCatConfig = z.infer<typeof NapCatConfigSchema>;
 export type JudgeConfig = z.infer<typeof JudgeConfigSchema>;
 export type VisionConfig = z.infer<typeof VisionConfigSchema>;
 export type DevModeConfig = z.infer<typeof DevModeConfigSchema>;
+export type MemoryExtractConfig = z.infer<typeof MemoryExtractConfigSchema>;
 export type BehaviorConfig = z.infer<typeof BehaviorConfigSchema>;
 export type PipelineConfig = z.infer<typeof PipelineConfigSchema>;
 export type ExtractionConfig = z.infer<typeof ExtractionConfigSchema>;

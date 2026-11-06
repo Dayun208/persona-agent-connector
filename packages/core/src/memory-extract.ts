@@ -1,4 +1,4 @@
-import type { ChatClient } from './llm.js';
+import type { ChatClient, CompleteOptions, LlmMessage } from './llm.js';
 import type { Logger } from './logger.js';
 import { extractJsonValue } from './json-utils.js';
 import type { ChatMessage } from './types.js';
@@ -67,8 +67,17 @@ export function formatDialogue(messages: ChatMessage[], maxChars = 6_000): strin
   return out;
 }
 
+/**
+ * 只要"能把一段对话补全成文本"就行 —— 这样本地 ChatClient、
+ * OpenClaw 的 agent 适配器都能用同一套抽取逻辑。
+ */
+export interface TextCompleter {
+  configured: boolean;
+  complete(messages: LlmMessage[], opts?: CompleteOptions): Promise<{ text: string }>;
+}
+
 export async function extractMemoryCandidates(
-  client: ChatClient,
+  client: TextCompleter,
   messages: ChatMessage[],
   opts: { maxItems?: number; minImportance?: number; logger?: Logger },
 ): Promise<ExtractMemoriesResult> {

@@ -28,10 +28,18 @@ export function extractJsonValue(text: string): unknown {
   const unfencedParse = tryParse(unfenced);
   if (unfencedParse !== undefined) return unfencedParse;
 
-  for (const [open, close] of [
-    ['{', '}'],
-    ['[', ']'],
-  ] as const) {
+  // 按最早出现的开括号来试：否则 " [{...},{...}] " 会先命中 '{'，
+  // 只解析出第一个对象，把数组整个丢掉
+  const braces = [
+    ['{', '}'] as const,
+    ['[', ']'] as const,
+  ]
+    .map((pair) => ({ pair, at: unfenced.indexOf(pair[0]) }))
+    .filter((x) => x.at !== -1)
+    .sort((a, b) => a.at - b.at)
+    .map((x) => x.pair);
+
+  for (const [open, close] of braces) {
     const start = unfenced.indexOf(open);
     if (start === -1) continue;
     const candidate = scanBalanced(unfenced, start, open, close);
