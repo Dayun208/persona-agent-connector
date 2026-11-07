@@ -25,6 +25,8 @@ export interface PersonaDistillTarget {
   auto: boolean;
   /** 上次提纯完成时间 */
   lastRunAt?: number;
+  /** 上次提纯尝试时间（失败的也算，用来做退避，避免每 10 分钟白跑一次模型） */
+  lastAttemptAt?: number;
   /** 上次提纯后又积累了多少条目标用户发言 */
   lastMessageCount?: number;
 }

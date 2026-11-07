@@ -691,6 +691,11 @@ export class Runtime {
       for (const persona of this.stores.personas.list()) {
         const t = persona.distill;
         if (!t?.auto || !t.senderId || this.distillBusy.has(persona.id)) continue;
+        // 上一次尝试失败（比如草稿太短被护栏拦下）就退避 6 小时，
+        // 否则每 10 分钟白跑一次 20 多秒的提纯
+        const lastAttempt = t.lastAttemptAt ?? 0;
+        if (Date.now() - lastAttempt < 6 * 60 * 60_000) continue;
+
         const since = t.lastRunAt ?? 0;
         const fresh = this.stores.archive.query({
           senderId: t.senderId,
@@ -700,6 +705,12 @@ export class Runtime {
         }).length;
         if (fresh < 30) continue;
         this.distillBusy.add(persona.id);
+        // 先记下尝试时间并落盘，失败也不会在 10 分钟内重试
+        this.stores.personas.upsert({
+          id: persona.id,
+          name: persona.name,
+          distill: { ...t, lastAttemptAt: Date.now() },
+        });
         try {
           const r = await this.distillPersonaById(persona.id);
           if (!r.ok) this.logger.warn('自动提纯失败', { persona: persona.name, error: r.error });
@@ -709,6 +720,7 @@ export class Runtime {
           this.distillBusy.delete(persona.id);
         }
       }
+      await this.stores.personas.flush().catch(() => undefined);
     };
     this.autoDistillTimer = setInterval(() => void run(), 10 * 60 * 1000);
     this.autoDistillTimer.unref?.();
