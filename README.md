@@ -533,6 +533,10 @@ pnpm dev           # 同时起 server 与 fake-napcat
 - Agent 能做的事完全由 `behavior.*` 决定 —— 宁可先全关，确认链路后再逐个放开。
 - 消息会用 JSONL 明文存在 `data/messages.jsonl`，注意隐私与磁盘占用。
 
+## 部署与启动
+
+手动启动、依赖顺序、自检清单、常见故障见 [docs/STARTUP.md](./docs/STARTUP.md)。
+
 ## Roadmap
 
 完整路线图（含验收标准与"明确不做"清单）见 [ROADMAP.md](./ROADMAP.md)。
